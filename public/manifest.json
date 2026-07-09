@@ -1,0 +1,17 @@
+{
+  "name": "Tupia Workspace",
+  "short_name": "Tupia",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#111827",
+  "description": "Tu Hub de IA Inteligente, CRM y Editor de Video",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/11696/11696147.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
