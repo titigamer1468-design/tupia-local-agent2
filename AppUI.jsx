@@ -1,7 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
-// Importamos nuestros nuevos módulos limpios
 import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA } from './AIManager.js';
 import { renderVideo } from './VideoEngine.js';
+
+// Utilidad para empaquetar imágenes y enviarlas al servidor VPS
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.readAsDataURL(file);
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = error => reject(error);
+});
 
 const CodeBlock = ({ lang, code }) => {
   const handleCopy = () => navigator.clipboard.writeText(code.trim());
@@ -53,22 +60,27 @@ export default function AppUI() {
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
   const [videoFormat, setVideoFormat] = useState('vertical');
+  
+  // 🔥 ESTADO DE CONEXIÓN (Local vs VPS) 🔥
+  const [engineMode, setEngineMode] = useState('local'); 
+
   const [isRendering, setIsRendering] = useState(false);
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D modular listo para generar.");
   const [videoResult, setVideoResult] = useState(null);
   
-  const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '' });
+  // Añadimos vpsUrl a las llaves maestras
+  const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', vpsUrl: 'http://localhost:5000' });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
-  // Carga inicial y persistencia
   useEffect(() => { if (MODEL_VERSIONS[activeModel]) setSpecificModel(MODEL_VERSIONS[activeModel][0].id); }, [activeModel]);
 
   useEffect(() => {
     const loadedKeys = {
       gemini: localStorage.getItem('key_gemini') || '', openai: localStorage.getItem('key_openai') || '',
       claude: localStorage.getItem('key_claude') || '', deepseek: localStorage.getItem('key_deepseek') || '',
-      alibaba: localStorage.getItem('key_alibaba') || '', nvidia: localStorage.getItem('key_nvidia') || '', ghl: localStorage.getItem('key_ghl') || ''
+      alibaba: localStorage.getItem('key_alibaba') || '', nvidia: localStorage.getItem('key_nvidia') || '', ghl: localStorage.getItem('key_ghl') || '',
+      vpsUrl: localStorage.getItem('key_vpsUrl') || 'http://localhost:5000'
     };
     setKeys(loadedKeys);
     
@@ -78,7 +90,7 @@ export default function AppUI() {
       setChats(parsedChats);
       const savedCurrentId = localStorage.getItem('tupia_current_chat');
       setCurrentChatId(savedCurrentId && parsedChats.find(c => c.id === savedCurrentId) ? savedCurrentId : parsedChats[0].id);
-      addLog("[OK] Sistema iniciado (Modo Modular).");
+      addLog("[OK] Sistema iniciado.");
     } else { createNewChat(); }
   }, []);
 
@@ -107,7 +119,7 @@ export default function AppUI() {
   const saveSettings = () => {
     Object.entries(keys).forEach(([provider, key]) => localStorage.setItem(`key_${provider}`, key));
     setIsSaved(true); setTimeout(() => setIsSaved(false), 2000);
-    addLog("[INFO] Llaves guardadas en Bóveda.");
+    addLog("[INFO] Configuración guardada en Bóveda.");
   };
 
   const handleFileChange = async (e) => {
@@ -136,7 +148,7 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🚀 CONECTOR CON EL MOTOR DE VIDEO (Modularizado)
+  // 🚀 CONECTOR HÍBRIDO (LOCAL + VPS SERVIDOR)
   // ==========================================================
   const handleRenderProcess = async () => {
     if (videoFiles.length === 0) return alert("Sube imágenes al Estudio primero.");
@@ -145,28 +157,58 @@ export default function AppUI() {
     setFfmpegLog("");
 
     try {
-      const url = await renderVideo({
-        videoFiles,
-        audioFile,
-        directorPlan,
-        fontSize,
-        textColor,
-        videoFormat,
-        onLog: (msg) => setFfmpegLog(prev => `${prev}\n${msg}`) // Conecta los logs del motor a la UI
-      });
-      
-      setVideoResult(url);
+      if (engineMode === 'local') {
+        // 🔥 MODO CELULAR (Trabaja con el archivo VideoEngine.js local)
+        const url = await renderVideo({
+          videoFiles,
+          audioFile,
+          directorPlan,
+          fontSize,
+          textColor,
+          videoFormat,
+          onLog: (msg) => setFfmpegLog(prev => `${prev}\n${msg}`)
+        });
+        setVideoResult(url);
+      } 
+      else {
+        // 🔥 MODO SERVIDOR VPS (Conexión a tu API Node.js / n8n env)
+        setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor...");
+        
+        const base64Videos = await Promise.all(videoFiles.map(f => fileToBase64(f.file)));
+        let audioBase64 = null;
+        if (audioFile) audioBase64 = await fileToBase64(audioFile);
+
+        const payload = {
+          batchId: `lote_tupia_${Date.now()}`,
+          videoFiles: base64Videos,
+          audioUrl: audioBase64, 
+          directorPlan,
+          fontSize,
+          textColor,
+          videoFormat
+        };
+
+        setFfmpegLog(`[INFO] 🚀 Transmitiendo datos a la fábrica remota (${keys.vpsUrl})...`);
+        const response = await fetch(`${keys.vpsUrl}/api/webhook/render-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || data.detalle || "Fallo en el Servidor VPS");
+
+        setVideoResult(data.downloadUrl); // El servidor devuelve el link directo al MP4
+        setFfmpegLog(`[INFO] ✅ ¡El Servidor completó el render en tiempo récord!`);
+      }
     } catch (error) {
       console.error(error);
-      setFfmpegLog(prev => `${prev}\n❌ ERROR DEL MOTOR: ${error?.message || error}`);
+      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
     } finally {
       setIsRendering(false);
     }
   };
 
-  // ==========================================================
-  // 🧠 CONECTOR CON LA IA (Modularizado)
-  // ==========================================================
   const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
 
   const handleSubmit = async (e) => {
@@ -193,15 +235,8 @@ export default function AppUI() {
     try {
       const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
       
-      // Llamada limpia a nuestro gestor de IA
       const { uiReply, directorPlan: planExtraido } = await procesarConsultaIA({
-        activeModel,
-        specificModel,
-        activePersona,
-        finalInput,
-        history,
-        images,
-        currentKey
+        activeModel, specificModel, activePersona, finalInput, history, images, currentKey
       });
 
       if (planExtraido) setDirectorPlan(planExtraido);
@@ -209,9 +244,7 @@ export default function AppUI() {
       setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: uiReply }] } : chat));
     } catch (error) {
       setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
-    } finally { 
-      setIsLoading(false); 
-    }
+    } finally { setIsLoading(false); }
   };
 
   const renderMessageContent = (text) => {
@@ -228,7 +261,6 @@ export default function AppUI() {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden">
-      {/* HEADER */}
       <header className="p-3 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10 shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={() => setIsSidebarOpen(true)} className="text-2xl text-gray-300 hover:text-white px-2 rounded hover:bg-gray-800 transition">☰</button>
@@ -237,7 +269,6 @@ export default function AppUI() {
         <button onClick={createNewChat} className="bg-blue-600/30 text-blue-400 border border-blue-800/50 px-3 py-1 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-colors">➕ Nuevo</button>
       </header>
 
-      {/* SIDEBAR */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-black/80 z-50 flex animate-in fade-in duration-200">
           <div className="w-4/5 max-w-sm bg-gray-950 h-full border-r border-gray-800 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
@@ -258,10 +289,7 @@ export default function AppUI() {
         </div>
       )}
 
-      {/* CUERPO CENTRAL */}
       <main className="flex-1 overflow-y-auto pb-48 relative">
-        
-        {/* TAB 1: CHAT */}
         {activeTab === 'chat' && (
           <div className="p-4 space-y-4">
             {activeChat.messages.length === 0 && (
@@ -289,10 +317,15 @@ export default function AppUI() {
           </div>
         )}
 
-        {/* TAB 2: ESTUDIO DE VIDEO */}
         {activeTab === 'studio' && (
           <div className="p-6 space-y-6">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-red-400">🎬 Tupia AI Video Director</h2>
+            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center justify-between text-red-400">
+              <span>🎬 Tupia Director</span>
+              <select value={engineMode} onChange={(e)=>setEngineMode(e.target.value)} className="bg-gray-900 text-xs text-white border border-gray-700 rounded-lg p-1">
+                <option value="local">⚙️ Procesar en Celular</option>
+                <option value="vps">🚀 Enviar al Servidor VPS</option>
+              </select>
+            </h2>
             
             {directorPlan && (
               <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
@@ -350,7 +383,7 @@ export default function AppUI() {
             )}
 
             <button onClick={handleRenderProcess} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
-              {isRendering ? "⚙️ Renderizando Magia 3D..." : "🎬 Compilar Superproducción"}
+              {isRendering ? "⚙️ Renderizando Magia 3D..." : `🎬 Renderizar en ${engineMode.toUpperCase()}`}
             </button>
 
             {videoResult && (
@@ -367,15 +400,22 @@ export default function AppUI() {
         {/* TAB 3: BÓVEDA */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-4">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de APIs</h2>
+            <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de Configuración</h2>
+            
+            <div className="bg-gray-900 p-3 rounded-xl border border-gray-800">
+              <label className="block text-sm font-bold text-green-400 mb-1">🔗 Conexión al VPS (Fábrica) </label>
+              <input type="text" value={keys.vpsUrl} onChange={(e) => setKeys(prev => ({...prev, vpsUrl: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-green-500 text-sm" placeholder="Ej: http://tu-ip:5000" />
+              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde n8n enviará las órdenes masivas.</p>
+            </div>
+
             {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
-              <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800">
+              <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800 mt-2">
                 <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">{id === 'ghl' ? 'GoHighLevel (CRM)' : id}</label>
                 <input type="password" value={keys[id]} onChange={(e) => setKeys(prev => ({...prev, [id]: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-blue-500 text-sm" placeholder="Pega tu token aquí..." />
               </div>
             ))}
             <button onClick={saveSettings} className={`w-full font-bold py-3 rounded-xl shadow-lg ${isSaved ? 'bg-green-600' : 'bg-blue-600'}`}>
-              {isSaved ? "✅ Guardado" : "💾 Guardar Llaves"}
+              {isSaved ? "✅ Guardado" : "💾 Guardar Ajustes"}
             </button>
           </div>
         )}
