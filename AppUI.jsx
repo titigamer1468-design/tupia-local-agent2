@@ -557,4 +557,11 @@ export default function AppUI() {
 
       {/* MENÚ INFERIOR MÓVIL */}
       <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
-        <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab
+        <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
+        <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
+        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='settings'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">⚙️</span><span className="text-[9px] font-bold">BÓVEDA</span></button>
+        <button onClick={() => setActiveTab('logs')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='logs'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">📋</span><span className="text-[9px] font-bold">LOGS</span></button>
+      </nav>
+    </div>
+  );
+}
