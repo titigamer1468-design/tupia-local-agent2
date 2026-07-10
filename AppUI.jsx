@@ -1,100 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
-const MODEL_VERSIONS = {
-  openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
-  claude: [{ id: 'claude-3-5-sonnet-20241022', name: 'Sonnet 3.5' }, { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5' }],
-  gemini: [{ id: 'gemini-1.5-flash', name: '1.5 Flash' }, { id: 'gemini-1.5-pro', name: '1.5 Pro' }],
-  deepseek: [{ id: 'deepseek-chat', name: 'V3 Chat' }, { id: 'deepseek-reasoner', name: 'R1 Reasoner' }],
-  alibaba: [{ id: 'qwen-plus', name: 'Qwen Plus' }, { id: 'qwen-max', name: 'Qwen Max' }],
-  nvidia: [{ id: 'meta/llama3-70b-instruct', name: 'Llama 3 70B' }]
-};
-
-const PERSONAS = {
-  default: "Eres Tupia, un asistente de IA experto y amigable. Respondes de forma clara, directa y estructurada.",
-  plan: "Eres Tupia MODO PLAN. Eres un Estratega y Project Manager experto. No escribes código. Tu objetivo es desglosar ideas en planes de acción paso a paso, cronogramas, listas de requisitos y definir objetivos. Estructuras todo con listas para máxima claridad.",
-  think: "Eres Tupia MODO THINK. Eres un Arquitecto de Software y Diseñador de Prompts (Prompt Engineer). Tu objetivo es tomar un 'Plan' y PENSAR la arquitectura técnica. Desglosas el proyecto en: 1) Estructura de archivos, 2) Flujo de datos, y 3) Escribes la secuencia exacta de PROMPTS super detallados que el usuario deberá copiar y pegar en el 'Modo Build' para que la IA genere el código sin errores. Eres el puente entre la idea y la programación.",
-  build: "Eres Tupia MODO BUILD. Eres un Desarrollador Full-Stack de élite. Escribes código listo para producción, limpio y optimizado. No das explicaciones largas ni saludos. Te limitas a entregar el bloque de código perfecto solicitado y una breve línea de cómo usarlo.",
-  director: `Eres Tupia MODO DIRECTOR DE CINE. Recibirás una temática del usuario. Tu trabajo es escribir un guion para un Short/Reel impactante.
-⚠️ DEBES DEVOLVER ÚNICA Y EXCLUSIVAMENTE UN ARRAY JSON VÁLIDO. SIN TEXTO ANTES NI DESPUÉS. ⚠️
-El JSON debe tener esta estructura exacta para al menos 3 escenas:
-[
-  {
-    "id": 0,
-    "texto_pantalla": "TÍTULO VIRAL",
-    "efecto_camara": "zoom_in_3d",
-    "duracion": 5
-  },
-  {
-    "id": 1,
-    "texto_pantalla": "EL SECRETO",
-    "efecto_camara": "zoom_out_3d",
-    "duracion": 5
-  }
-]
-Efectos permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_left".`,
-  youtube: "Eres Tupia MODO YOUTUBE. Eres un experto en retención de audiencia y el algoritmo de YouTube. Creas Títulos Virales y Ganchos (Hooks) irresistibles para los primeros 15 segundos.",
-  infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
-};
-
-// 🔥 GENERADOR DE CAPAS ADAPTATIVO (Horizontal/Vertical) 🔥
-const createFrame = (file, textOverlay, fontSize, textColor, format) => {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const isVertical = format === 'vertical';
-      const targetW = isVertical ? 1080 : 1920;
-      const targetH = isVertical ? 1920 : 1080;
-      
-      canvas.width = targetW; 
-      canvas.height = targetH;
-      const ctx = canvas.getContext('2d');
-      
-      // Fondo oscuro para evitar bordes blancos
-      ctx.fillStyle = "#050505"; 
-      ctx.fillRect(0, 0, targetW, targetH);
-      
-      // Escalar imagen tipo Cover
-      const scale = Math.max(targetW / img.width, targetH / img.height);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
-      
-      // Estampar Textos si la IA los generó
-      if (textOverlay) {
-        ctx.font = `bold ${fontSize}px 'Impact', sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.lineWidth = Math.max(4, fontSize * 0.1);
-        ctx.strokeStyle = "black";
-        ctx.fillStyle = textColor;
-        
-        ctx.shadowColor = "rgba(0,0,0,0.9)"; 
-        ctx.shadowBlur = 20;
-        ctx.shadowOffsetX = 5;
-        ctx.shadowOffsetY = 5;
-
-        const lines = textOverlay.split('\\n');
-        const centerY = targetH / 2;
-        lines.forEach((line, i) => {
-           const yPos = centerY + (i * (parseInt(fontSize) + 20)) - ((lines.length - 1) * (parseInt(fontSize) / 2));
-           ctx.strokeText(line, targetW / 2, yPos);
-           ctx.fillText(line, targetW / 2, yPos);
-        });
-      }
-
-      canvas.toBlob((blob) => { 
-        URL.revokeObjectURL(url); 
-        resolve(blob); 
-      }, 'image/jpeg', 0.95);
-    };
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-};
+// Importamos nuestros nuevos módulos limpios
+import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA } from './AIManager.js';
+import { renderVideo } from './VideoEngine.js';
 
 const CodeBlock = ({ lang, code }) => {
   const handleCopy = () => navigator.clipboard.writeText(code.trim());
@@ -139,22 +46,22 @@ export default function AppUI() {
   const [specificModel, setSpecificModel] = useState('gpt-4o-mini'); 
   const [activePersona, setActivePersona] = useState('director');
   
-  // 🔥 ESTADOS DEL EDITOR PRO 🔥
+  // 🔥 ESTADOS DEL ESTUDIO DE VIDEO 🔥
   const [videoFiles, setVideoFiles] = useState([]);
   const [audioFile, setAudioFile] = useState(null);
   const [directorPlan, setDirectorPlan] = useState(null); 
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
-  const [videoFormat, setVideoFormat] = useState('vertical'); // Horizontal/Vertical Toggle
+  const [videoFormat, setVideoFormat] = useState('vertical');
   const [isRendering, setIsRendering] = useState(false);
-  const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D listo para generar.");
+  const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D modular listo para generar.");
   const [videoResult, setVideoResult] = useState(null);
   
-  const ffmpegRef = useRef(null);
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '' });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
+  // Carga inicial y persistencia
   useEffect(() => { if (MODEL_VERSIONS[activeModel]) setSpecificModel(MODEL_VERSIONS[activeModel][0].id); }, [activeModel]);
 
   useEffect(() => {
@@ -171,7 +78,7 @@ export default function AppUI() {
       setChats(parsedChats);
       const savedCurrentId = localStorage.getItem('tupia_current_chat');
       setCurrentChatId(savedCurrentId && parsedChats.find(c => c.id === savedCurrentId) ? savedCurrentId : parsedChats[0].id);
-      addLog("[OK] Historial restaurado.");
+      addLog("[OK] Sistema iniciado (Modo Modular).");
     } else { createNewChat(); }
   }, []);
 
@@ -200,7 +107,7 @@ export default function AppUI() {
   const saveSettings = () => {
     Object.entries(keys).forEach(([provider, key]) => localStorage.setItem(`key_${provider}`, key));
     setIsSaved(true); setTimeout(() => setIsSaved(false), 2000);
-    addLog("[INFO] Llaves guardadas.");
+    addLog("[INFO] Llaves guardadas en Bóveda.");
   };
 
   const handleFileChange = async (e) => {
@@ -229,129 +136,81 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🚀 MOTOR RENDER 3D: ARQUITECTURA LIMPIA Y EXACTA 🚀
+  // 🚀 CONECTOR CON EL MOTOR DE VIDEO (Modularizado)
   // ==========================================================
-  const runFfmpegRender = async () => {
+  const handleRenderProcess = async () => {
     if (videoFiles.length === 0) return alert("Sube imágenes al Estudio primero.");
-    setIsRendering(true); 
+    setIsRendering(true);
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor 3D CapCut de Tupia...");
+    setFfmpegLog("");
 
     try {
-      if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg();
-      const ffmpeg = ffmpegRef.current;
-
-      ffmpeg.on('log', ({ message }) => setFfmpegLog(prev => `${prev}\n[FFMPEG] ${message}`));
-
-      if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local (ESM)...`);
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-        await ffmpeg.load({
-          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
-        });
-      }
-
-      setFfmpegLog(prev => `${prev}\n[INFO] ✍️ Renderizando Textos y Lienzos (${videoFormat})...`);
-      for (let i = 0; i < videoFiles.length; i++) {
-        const textoIA = directorPlan && directorPlan[i] ? directorPlan[i].texto_pantalla : null;
-        const jpgBlob = await createFrame(videoFiles[i].file, textoIA, fontSize, textColor, videoFormat);
-        await ffmpeg.writeFile(`img${i}.jpg`, await fetchFile(jpgBlob));
-      }
-
-      let ffmpegArgs = [];
+      const url = await renderVideo({
+        videoFiles,
+        audioFile,
+        directorPlan,
+        fontSize,
+        textColor,
+        videoFormat,
+        onLog: (msg) => setFfmpegLog(prev => `${prev}\n${msg}`) // Conecta los logs del motor a la UI
+      });
       
-      // 1. AÑADIR INPUTS DE VIDEO (Garantizando el tiempo por clip de la IA o 5s)
-      for (let i = 0; i < videoFiles.length; i++) {
-        const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
-        ffmpegArgs.push('-loop', '1', '-t', `${clipDur}`, '-i', `img${i}.jpg`);
-      }
-      
-      // 2. AÑADIR INPUT DE AUDIO
-      if (audioFile) {
-        setFfmpegLog(prev => `${prev}\n[INFO] 🎵 Cargando música...`);
-        await ffmpeg.writeFile('audio.mp3', await fetchFile(audioFile));
-        ffmpegArgs.push('-i', 'audio.mp3');
-      }
-
-      setFfmpegLog(prev => `${prev}\n[INFO] 🎥 Calculando Efectos Matemáticos...`);
-      
-      let filterComplex = "";
-      let concatInputs = "";
-      let duracionTotal = 0;
-      const fps = 30;
-
-      // Variables adaptativas según el formato
-      const isVert = videoFormat === 'vertical';
-      const targetW = isVert ? 1080 : 1920;
-      const targetH = isVert ? 1920 : 1080;
-      const zoomW = isVert ? 1200 : 2133;
-      const zoomH = isVert ? 2133 : 1200;
-
-      // 3. CONSTRUIR FILTROS DE MOVIMIENTO
-      for (let i = 0; i < videoFiles.length; i++) {
-        const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
-        const clipEfecto = directorPlan && directorPlan[i] ? directorPlan[i].efecto_camara : "zoom_in_3d";
-        const frames = Math.round(clipDur * fps);
-        duracionTotal += clipDur;
-
-        let cameraFX = "";
-        if (clipEfecto === 'zoom_in_3d' || clipEfecto === 'zoom_out_3d') { 
-          cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-        } else if (clipEfecto === 'pan_right') {
-          cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-        } else { 
-          cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-        }
-
-        if (!directorPlan) {
-          const mod = i % 3;
-          if (mod === 0) cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(zoom+0.002,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-          if (mod === 1) cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-          if (mod === 2) cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-        }
-
-        filterComplex += `[${i}:v]${cameraFX}[v${i}];`;
-        concatInputs += `[v${i}]`;
-      }
-
-      if (videoFiles.length > 1) {
-          filterComplex += `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`;
-          ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]');
-      } else {
-          filterComplex = filterComplex.slice(0, -1);
-          ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
-      }
-
-      // 4. MAPEO ESTRICTO DE AUDIO Y CONFIGURACIÓN FINAL DE TIEMPO
-      if (audioFile) {
-        const audioInputIndex = videoFiles.length; 
-        ffmpegArgs.push('-map', `${audioInputIndex}:a`, '-c:a', 'aac', '-b:a', '192k');
-      }
-
-      ffmpegArgs.push(
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-t', `${duracionTotal}`, // 🔥 EL LÍMITE MAESTRO Y EXACTO DE TIEMPO 🔥
-        'output.mp4'
-      );
-
-      setFfmpegLog(prev => `${prev}\n[INFO] Ejecutando render final (Límite matemático forzado a ${duracionTotal}s)...`);
-      const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
-
-      if (codigoRetorno !== 0) throw new Error("Compilación fallida. Código: " + codigoRetorno);
-
-      const data = await ffmpeg.readFile('output.mp4');
-      const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-
-      setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡OBRA MAESTRA LISTA! Duración exacta: ${duracionTotal}s.`);
-
+      setVideoResult(url);
     } catch (error) {
-      console.error(error); 
-      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
+      console.error(error);
+      setFfmpegLog(prev => `${prev}\n❌ ERROR DEL MOTOR: ${error?.message || error}`);
+    } finally {
+      setIsRendering(false);
+    }
+  };
+
+  // ==========================================================
+  // 🧠 CONECTOR CON LA IA (Modularizado)
+  // ==========================================================
+  const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+
+    const currentKey = keys[activeModel];
+    if (!currentKey) { alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`); setActiveTab('settings'); return; }
+
+    let finalInput = input;
+    const textFiles = attachments.filter(a => a.type === 'text');
+    if (textFiles.length > 0) {
+      finalInput += "\n\n" + textFiles.map(a => `--- ARCHIVO: ${a.name} ---\n${a.data}\n--- FIN DE ARCHIVO ---`).join('\n\n');
+    }
+    const images = attachments.filter(a => a.type === 'image');
+
+    const displayUserText = input + (attachments.length > 0 ? `\n[+ ${attachments.length} archivos]` : '');
+    const newMessages = [...activeChat.messages, { role: 'user', content: displayUserText, rawContent: finalInput }];
+    
+    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMessages } : chat));
+    setInput(""); setIsLoading(true); setAttachments([]);
+    addLog(`Consultando a ${activePersona.toUpperCase()} via ${activeModel}...`);
+
+    try {
+      const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
+      
+      // Llamada limpia a nuestro gestor de IA
+      const { uiReply, directorPlan: planExtraido } = await procesarConsultaIA({
+        activeModel,
+        specificModel,
+        activePersona,
+        finalInput,
+        history,
+        images,
+        currentKey
+      });
+
+      if (planExtraido) setDirectorPlan(planExtraido);
+
+      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: uiReply }] } : chat));
+    } catch (error) {
+      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
     } finally { 
-      setIsRendering(false); 
+      setIsLoading(false); 
     }
   };
 
@@ -367,55 +226,9 @@ export default function AppUI() {
     });
   };
 
-  const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
-
-    const currentKey = keys[activeModel];
-    if (!currentKey) { alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`); setActiveTab('settings'); return; }
-
-    const finalInput = input;
-    const newMessages = [...activeChat.messages, { role: 'user', content: input, rawContent: finalInput }];
-    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMessages } : chat));
-    setInput(""); setIsLoading(true); setAttachments([]);
-    addLog(`Consultando al ${activePersona}...`);
-
-    try {
-      const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
-      
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
-        body: JSON.stringify({ 
-          model: 'gpt-4o-mini', 
-          messages: [{ role: 'system', content: PERSONAS[activePersona] }, ...history] 
-        })
-      });
-      const data = await res.json();
-      let botReply = data.choices[0].message.content;
-
-      if (activePersona === 'director') {
-        try {
-          const jsonMatch = botReply.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            const plan = JSON.parse(jsonMatch[0]);
-            setDirectorPlan(plan);
-            botReply = `🎬 **¡Dirección Lista!**\nConfiguré el Estudio con ${plan.length} escenas.\n\n` +
-                       plan.map(p => `📽️ **Escena ${p.id + 1} (${p.duracion}s)**\n*Texto:* ${p.texto_pantalla}\n*Cámara:* ${p.efecto_camara}`).join('\n\n') +
-                       `\n\n👉 ¡Ve a la pestaña ESTUDIO, ajusta el texto, sube tus fotos y Compila!`;
-          }
-        } catch (e) { console.error("Fallo parseando JSON Director", e); }
-      }
-
-      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: botReply }] } : chat));
-    } catch (error) {
-      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
-    } finally { setIsLoading(false); }
-  };
-
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden">
+      {/* HEADER */}
       <header className="p-3 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10 shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={() => setIsSidebarOpen(true)} className="text-2xl text-gray-300 hover:text-white px-2 rounded hover:bg-gray-800 transition">☰</button>
@@ -424,6 +237,7 @@ export default function AppUI() {
         <button onClick={createNewChat} className="bg-blue-600/30 text-blue-400 border border-blue-800/50 px-3 py-1 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-colors">➕ Nuevo</button>
       </header>
 
+      {/* SIDEBAR */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-black/80 z-50 flex animate-in fade-in duration-200">
           <div className="w-4/5 max-w-sm bg-gray-950 h-full border-r border-gray-800 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
@@ -444,7 +258,10 @@ export default function AppUI() {
         </div>
       )}
 
+      {/* CUERPO CENTRAL */}
       <main className="flex-1 overflow-y-auto pb-48 relative">
+        
+        {/* TAB 1: CHAT */}
         {activeTab === 'chat' && (
           <div className="p-4 space-y-4">
             {activeChat.messages.length === 0 && (
@@ -460,9 +277,7 @@ export default function AppUI() {
                   {msg.role === 'assistant' && (
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-700/50">
                       <span className="text-xs font-bold text-gray-500 flex items-center gap-1">🤖 Tupia AI</span>
-                      <button onClick={() => navigator.clipboard.writeText(msg.content)} className="text-[10px] uppercase font-bold tracking-wider flex items-center gap-1 text-gray-400 hover:text-white bg-gray-800 px-2 py-1 rounded transition-colors">
-                        📋 Copiar Todo
-                      </button>
+                      <button onClick={() => navigator.clipboard.writeText(msg.content)} className="text-[10px] uppercase font-bold tracking-wider flex items-center gap-1 text-gray-400 hover:text-white bg-gray-800 px-2 py-1 rounded transition-colors">📋 Copiar Todo</button>
                     </div>
                   )}
                   {msg.role === 'user' ? <p className="whitespace-pre-wrap">{msg.content}</p> : renderMessageContent(msg.content)}
@@ -474,6 +289,7 @@ export default function AppUI() {
           </div>
         )}
 
+        {/* TAB 2: ESTUDIO DE VIDEO */}
         {activeTab === 'studio' && (
           <div className="p-6 space-y-6">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-red-400">🎬 Tupia AI Video Director</h2>
@@ -485,18 +301,11 @@ export default function AppUI() {
               </div>
             )}
 
-            {/* 🔥 CONTROLES DE FORMATO RESTAURADOS 🔥 */}
             <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4">
-              <button
-                onClick={() => setVideoFormat('horizontal')}
-                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
-              >
+              <button onClick={() => setVideoFormat('horizontal')} className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}>
                 🖥️ Horizontal (16:9)
               </button>
-              <button
-                onClick={() => setVideoFormat('vertical')}
-                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
-              >
+              <button onClick={() => setVideoFormat('vertical')} className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}>
                 📱 Vertical (9:16)
               </button>
             </div>
@@ -540,7 +349,7 @@ export default function AppUI() {
               </div>
             )}
 
-            <button onClick={runFfmpegRender} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
+            <button onClick={handleRenderProcess} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
               {isRendering ? "⚙️ Renderizando Magia 3D..." : "🎬 Compilar Superproducción"}
             </button>
 
@@ -555,6 +364,7 @@ export default function AppUI() {
           </div>
         )}
 
+        {/* TAB 3: BÓVEDA */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-4">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de APIs</h2>
@@ -570,6 +380,7 @@ export default function AppUI() {
           </div>
         )}
 
+        {/* TAB 4: LOGS */}
         {activeTab === 'logs' && (
           <div className="p-4 h-full flex flex-col">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 mb-4">📋 Consola Técnica</h2>
@@ -580,6 +391,7 @@ export default function AppUI() {
         )}
       </main>
 
+      {/* CONTROLES DE ESCRITURA INFERIORES */}
       {activeTab === 'chat' && (
         <div className="fixed bottom-[70px] left-0 w-full bg-gray-900 border-t border-gray-800 z-10 p-2 flex flex-col gap-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
           <div className="grid grid-cols-3 gap-1">
@@ -627,6 +439,7 @@ export default function AppUI() {
         </div>
       )}
 
+      {/* MENÚ INFERIOR */}
       <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
         <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
         <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
