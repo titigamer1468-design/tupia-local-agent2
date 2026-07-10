@@ -5,7 +5,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
-// Caché del motor
 let ffmpegInstance = null;
 
 /**
@@ -69,7 +68,7 @@ export const createFrame = (file, textOverlay, fontSize, textColor, format) => {
 };
 
 /**
- * 🎥 Controlador Principal FFmpeg
+ * 🎥 Controlador Principal FFmpeg con TRANSICIONES XFADE
  */
 export async function renderVideo({ 
   videoFiles, 
@@ -80,7 +79,7 @@ export async function renderVideo({
   videoFormat, 
   onLog 
 }) {
-  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D...");
+  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Con Transiciones)...");
 
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
@@ -105,10 +104,23 @@ export async function renderVideo({
 
   let ffmpegArgs = [];
   
-  // 🔥 FIX 1: Input exacto forzando 30 Fotogramas por Segundo (FPS) 🔥
+  // 🔥 MATEMÁTICA DE TIEMPO EXACTA PARA TRANSICIONES 🔥
+  const fadeDur = 0.8; // 0.8 segundos de transición fluida
+  const fps = 30;
+  let duracionTotal = 0;
+
+  // 1. INPUTS (Añadiendo el tiempo de superposición a cada clip)
   for (let i = 0; i < videoFiles.length; i++) {
-    const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
-    ffmpegArgs.push('-loop', '1', '-framerate', '30', '-t', `${clipDur}`, '-i', `img${i}.jpg`);
+    let baseDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
+    duracionTotal += baseDur; // Sumamos la duración pura al total
+    
+    let inputDur = baseDur;
+    // Si no es el último clip, le regalamos el tiempo del fundido para que el video no se encoja
+    if (i < videoFiles.length - 1) {
+        inputDur += fadeDur; 
+    }
+    
+    ffmpegArgs.push('-loop', '1', '-framerate', `${fps}`, '-t', `${inputDur}`, '-i', `img${i}.jpg`);
   }
   
   if (audioFile) {
@@ -117,54 +129,61 @@ export async function renderVideo({
     ffmpegArgs.push('-i', 'audio.mp3');
   }
 
-  onLog("[INFO] 🎥 Calculando trayectorias de cámara (Matemática Pura)...");
+  onLog("[INFO] 🎥 Procesando Cámaras 3D y Transiciones (Crossfade)...");
   
   let filterComplex = "";
-  let concatInputs = "";
-  let duracionTotal = 0;
-
+  
   const isVert = videoFormat === 'vertical';
   const targetW = isVert ? 1080 : 1920;
   const targetH = isVert ? 1920 : 1080;
-  
   const zoomW = isVert ? 1200 : 2133;
   const zoomH = isVert ? 2133 : 1200;
 
-  // 🔥 FIX 2: d=1 en zoompan soluciona la multiplicación de fotogramas infinita 🔥
+  // 2. APLICAR ZOOM 3D A CADA CLIP INDIVIDUALMENTE
   for (let i = 0; i < videoFiles.length; i++) {
-    const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
     const clipEfecto = directorPlan && directorPlan[i] ? directorPlan[i].efecto_camara : null;
-    duracionTotal += clipDur;
-
-    let cameraFX = "";
-    
-    // Motor Adaptativo: Intercala si la IA no dio instrucciones
     const efectoAplicar = clipEfecto || ['zoom_in_3d', 'pan_right', 'zoom_out_3d', 'pan_left'][i % 4];
 
+    let cameraFX = "";
     if (efectoAplicar === 'zoom_in_3d') { 
-      cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(1+in*0.0015,1.2)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=30`;
+      cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(1+in*0.0015,1.2)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'zoom_out_3d') { 
-      cameraFX = `scale=${zoomW}:${zoomH},rotate='-0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='max(1.2-in*0.0015,1.0)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=30`;
+      cameraFX = `scale=${zoomW}:${zoomH},rotate='-0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='max(1.2-in*0.0015,1.0)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'pan_right') {
-      cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=30`;
+      cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else { 
-      // pan_left
-      cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)-in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=30`;
+      cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)-in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     }
 
-    // El setsar=1/1 asegura que todas las fotos se puedan concatenar sin fallos
-    filterComplex += `[${i}:v]${cameraFX},setsar=1/1[v${i}];`;
-    concatInputs += `[v${i}]`;
+    // Obligamos a FFmpeg a tener el mismo formato exacto para que el Crossfade no explote
+    filterComplex += `[${i}:v]${cameraFX},setsar=1/1,format=yuv420p[v${i}];`;
   }
 
+  // 3. ENCADENAR LAS TRANSICIONES SUAVES (XFADE)
   if (videoFiles.length > 1) {
-      filterComplex += `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`;
+      let lastNode = "[v0]";
+      let currentOffset = 0;
+      
+      for (let i = 1; i < videoFiles.length; i++) {
+          const baseDur = directorPlan && directorPlan[i-1] ? directorPlan[i-1].duracion : 5;
+          currentOffset += baseDur; // Usamos el tiempo puro para que el empalme sea milimétrico
+          
+          const isLast = (i === videoFiles.length - 1);
+          const nextNode = isLast ? "[outv]" : `[xf${i}]`;
+          
+          // xfade toma los dos clips y los funde
+          filterComplex += `${lastNode}[v${i}]xfade=transition=fade:duration=${fadeDur}:offset=${currentOffset}${nextNode}`;
+          if (!isLast) filterComplex += ';';
+          
+          lastNode = nextNode;
+      }
       ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]');
   } else {
       filterComplex = filterComplex.slice(0, -1);
       ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
   }
 
+  // 4. MAPEO DE AUDIO Y CIERRE
   if (audioFile) {
     const audioInputIndex = videoFiles.length; 
     ffmpegArgs.push('-map', `${audioInputIndex}:a`, '-c:a', 'aac', '-b:a', '192k');
@@ -173,11 +192,11 @@ export async function renderVideo({
   ffmpegArgs.push(
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
-    '-t', `${duracionTotal}`,
+    '-t', `${duracionTotal}`, // Tiempo final perfecto
     'output.mp4'
   );
 
-  onLog(`[INFO] 🚀 Renderizando hardware (Tiempo Total: ${duracionTotal}s)...`);
+  onLog(`[INFO] 🚀 Renderizando hardware (Tiempo Total Exacto: ${duracionTotal}s)...`);
   
   const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
   if (codigoRetorno !== 0) throw new Error("Compilación abortada. Código de error: " + codigoRetorno);
