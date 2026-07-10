@@ -223,13 +223,13 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🚀 MOTOR RENDER 3D: ARQUITECTURA LIMPIA Y ORDENADA 🚀
+  // 🚀 MOTOR RENDER 3D: ARQUITECTURA LIMPIA Y EXACTA 🚀
   // ==========================================================
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) return alert("Sube imágenes al Estudio primero.");
     setIsRendering(true); 
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor 3D de Tupia...");
+    setFfmpegLog("[INFO] Despertando al motor 3D CapCut de Tupia...");
 
     try {
       if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg();
@@ -255,13 +255,13 @@ export default function AppUI() {
 
       let ffmpegArgs = [];
       
-      // 1. AÑADIR INPUTS (VIDEOS)
+      // 1. AÑADIR INPUTS DE VIDEO (Garantizando el tiempo por clip de la IA o 5s)
       for (let i = 0; i < videoFiles.length; i++) {
         const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
         ffmpegArgs.push('-loop', '1', '-t', `${clipDur}`, '-i', `img${i}.jpg`);
       }
       
-      // 2. AÑADIR INPUT (AUDIO)
+      // 2. AÑADIR INPUT DE AUDIO
       if (audioFile) {
         setFfmpegLog(prev => `${prev}\n[INFO] 🎵 Cargando música...`);
         await ffmpeg.writeFile('audio.mp3', await fetchFile(audioFile));
@@ -291,7 +291,6 @@ export default function AppUI() {
           cameraFX = `scale=1200:2133,zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
         }
 
-        // Si la IA no decide, intercalamos efectos
         if (!directorPlan) {
           const mod = i % 3;
           if (mod === 0) cameraFX = `scale=1200:2133,rotate='0.02*sin(t)':ow=1200:oh=2133:c=black,zoompan=z='min(zoom+0.002,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
@@ -311,7 +310,7 @@ export default function AppUI() {
           ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
       }
 
-      // 4. MAPEO ESTRICTO DE AUDIO Y CONFIGURACIÓN FINAL
+      // 4. MAPEO ESTRICTO DE AUDIO Y CONFIGURACIÓN FINAL DE TIEMPO
       if (audioFile) {
         const audioInputIndex = videoFiles.length; 
         ffmpegArgs.push('-map', `${audioInputIndex}:a`, '-c:a', 'aac', '-b:a', '192k');
@@ -320,11 +319,11 @@ export default function AppUI() {
       ffmpegArgs.push(
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
-        '-shortest', 
+        '-t', `${duracionTotal}`, // 🔥 EL LÍMITE MAESTRO Y EXACTO DE TIEMPO 🔥
         'output.mp4'
       );
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Ejecutando render final (Por favor espera)...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Ejecutando render final (Límite matemático forzado a ${duracionTotal}s)...`);
       const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
 
       if (codigoRetorno !== 0) throw new Error("Compilación fallida. Código: " + codigoRetorno);
@@ -333,7 +332,7 @@ export default function AppUI() {
       const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
 
       setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡OBRA MAESTRA LISTA! Duración aprox: ${duracionTotal}s.`);
+      setFfmpegLog(prev => `${prev}\n✅ ¡OBRA MAESTRA LISTA! Duración exacta: ${duracionTotal}s.`);
 
     } catch (error) {
       console.error(error); 
@@ -364,74 +363,24 @@ export default function AppUI() {
     const currentKey = keys[activeModel];
     if (!currentKey) { alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`); setActiveTab('settings'); return; }
 
-    let finalInput = input;
-    const textFiles = attachments.filter(a => a.type === 'text');
-    if (textFiles.length > 0) {
-      finalInput += "\n\n" + textFiles.map(a => `--- ARCHIVO: ${a.name} ---\n${a.data}\n--- FIN DE ARCHIVO ---`).join('\n\n');
-    }
-    const images = attachments.filter(a => a.type === 'image');
-
-    const displayUserText = input + (attachments.length > 0 ? `\n[+ ${attachments.length} archivos]` : '');
-    const newMessages = [...activeChat.messages, { role: 'user', content: displayUserText, rawContent: finalInput }];
+    const finalInput = input;
+    const newMessages = [...activeChat.messages, { role: 'user', content: input, rawContent: finalInput }];
     setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMessages } : chat));
     setInput(""); setIsLoading(true); setAttachments([]);
     addLog(`Consultando al ${activePersona}...`);
 
     try {
       const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
-      let botReply = "";
-
-      if (activeModel === 'gemini') {
-        const geminiHistory = history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
-        const currentParts = [{ text: finalInput }];
-        images.forEach(img => currentParts.push({ inline_data: { mime_type: img.mime, data: img.data.split(',')[1] } }));
-        
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${specificModel}:generateContent?key=${currentKey}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ system_instruction: { parts: [{ text: PERSONAS[activePersona] }] }, contents: [...geminiHistory, { role: 'user', parts: currentParts }] })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        botReply = data.candidates[0].content.parts[0].text;
-      }
-      else if (activeModel === 'claude') {
-        const claudeHistory = history.map(m => ({ role: m.role, content: m.content }));
-        const currentContent = [{ type: 'text', text: finalInput }];
-        images.forEach(img => currentContent.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data.split(',')[1] } }));
-
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': currentKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-          body: JSON.stringify({ model: specificModel, max_tokens: 4096, system: PERSONAS[activePersona], messages: [...claudeHistory, { role: 'user', content: currentContent }] })
-        });
-        const data = await res.json();
-        if (data.type === 'error') throw new Error(data.error.message);
-        botReply = data.content[0].text;
-      }
-      else {
-        let endpoint = '';
-        if (activeModel === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
-        else if (activeModel === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
-        else if (activeModel === 'alibaba') endpoint = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions';
-        else if (activeModel === 'nvidia') endpoint = 'https://integrate.api.nvidia.com/v1/chat/completions';
-
-        let currentContent = finalInput;
-        if (activeModel === 'openai' && images.length > 0) {
-          currentContent = [{ type: 'text', text: finalInput }];
-          images.forEach(img => currentContent.push({ type: 'image_url', image_url: { url: img.data } }));
-        }
-        const standardHistory = history.map(m => ({ role: m.role, content: m.content }));
-
-        const res = await fetch(endpoint, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
-          body: JSON.stringify({ 
-            model: specificModel, 
-            messages: [{ role: 'system', content: PERSONAS[activePersona] }, ...standardHistory, { role: 'user', content: currentContent }] 
-          })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message);
-        botReply = data.choices[0].message.content;
-      }
+      
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+        body: JSON.stringify({ 
+          model: 'gpt-4o-mini', 
+          messages: [{ role: 'system', content: PERSONAS[activePersona] }, ...history] 
+        })
+      });
+      const data = await res.json();
+      let botReply = data.choices[0].message.content;
 
       if (activePersona === 'director') {
         try {
@@ -606,7 +555,7 @@ export default function AppUI() {
         <div className="fixed bottom-[70px] left-0 w-full bg-gray-900 border-t border-gray-800 z-10 p-2 flex flex-col gap-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
           <div className="grid grid-cols-3 gap-1">
             <select value={activeModel} onChange={(e) => setActiveModel(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-blue-400 font-bold rounded-lg p-2 outline-none">
-              <option value="openai">OpenAI</option>
+              <option value="openai">OpenAI (Director)</option>
               <option value="deepseek">DeepSeek</option>
               <option value="claude">Claude</option>
               <option value="gemini">Gemini</option>
