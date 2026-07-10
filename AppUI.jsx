@@ -22,7 +22,7 @@ const PERSONAS = {
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
 };
 
-// 🔥 NUEVO: NORMALIZADOR UNIVERSAL DE IMÁGENES 🔥
+// 🔥 NORMALIZADOR UNIVERSAL DE IMÁGENES 🔥
 const normalizeImageToJPG = (file) => {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -32,7 +32,6 @@ const normalizeImageToJPG = (file) => {
       canvas.width = img.width;
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
-      // Fondo negro por si la imagen es un PNG con transparencia
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
@@ -191,7 +190,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEOS BLOB (ESM) 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + MATEMÁTICA DE TIEMPO 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -226,17 +225,22 @@ export default function AppUI() {
       setFfmpegLog(prev => `${prev}\n[INFO] Escribiendo fotos (Normalizando a JPG perfecto)...`);
 
       for (let i = 0; i < videoFiles.length; i++) {
-        // 🔥 AQUÍ ENTRA EL NORMALIZADOR PARA PREVENIR ERRORES DE PNG/WEBP 🔥
         const jpgBlob = await normalizeImageToJPG(videoFiles[i].file);
         const fileData = await fetchFile(jpgBlob);
         await ffmpeg.writeFile(`img${i}.jpg`, fileData);
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow (esto puede tomar unos segundos)...`);
+      // 🔥 MATEMÁTICA DE TIEMPO EXACTA 🔥
+      const segundosPorFoto = 3;
+      const duracionTotal = videoFiles.length * segundosPorFoto;
 
-      // 🔥 EL CÓDIGO DE ERROR NOS AVISA SI FFmpeg CHOCA 🔥
+      setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow de ${duracionTotal} segundos...`);
+
       const codigoRetorno = await ffmpeg.exec([
-        '-framerate', '1/2', 
+        '-framerate', `1/${segundosPorFoto}`, // Fija la duración de cada foto a 3 segundos
+        '-loop', '1',                         // Obliga a que la secuencia se repita sin morir al instante
+        '-t', `${duracionTotal}`,             // Corta el video exactamente cuando termine el lote
+        '-start_number', '0',                 // Asegura que empiece a leer desde la foto img0.jpg
         '-i', 'img%d.jpg',   
         '-c:v', 'libx264',   
         '-r', '30',          
@@ -256,7 +260,7 @@ export default function AppUI() {
       const videoUrl = URL.createObjectURL(videoBlob);
 
       setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado perfectamente.`);
+      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado perfectamente (${duracionTotal}s).`);
 
     } catch (error) {
       console.error(error);
