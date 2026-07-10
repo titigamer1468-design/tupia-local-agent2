@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-// 🔥 IMPORTACIÓN NATIVA: Vite empaquetará los Workers en tu dominio 🔥
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
@@ -17,43 +16,99 @@ const PERSONAS = {
   plan: "Eres Tupia MODO PLAN. Eres un Estratega y Project Manager experto. No escribes código. Tu objetivo es desglosar ideas en planes de acción paso a paso, cronogramas, listas de requisitos y definir objetivos. Estructuras todo con listas para máxima claridad.",
   think: "Eres Tupia MODO THINK. Eres un Arquitecto de Software y Diseñador de Prompts (Prompt Engineer). Tu objetivo es tomar un 'Plan' y PENSAR la arquitectura técnica. Desglosas el proyecto en: 1) Estructura de archivos, 2) Flujo de datos, y 3) Escribes la secuencia exacta de PROMPTS super detallados que el usuario deberá copiar y pegar en el 'Modo Build' para que la IA genere el código sin errores. Eres el puente entre la idea y la programación.",
   build: "Eres Tupia MODO BUILD. Eres un Desarrollador Full-Stack de élite. Escribes código listo para producción, limpio y optimizado. No das explicaciones largas ni saludos. Te limitas a entregar el bloque de código perfecto solicitado y una breve línea de cómo usarlo.",
-  director: "Eres Tupia MODO DIRECTOR DE CINE. Tu trabajo es analizar la emoción o temática que pide el usuario y tomar DECISIONES MATEMÁTICAS ÓPTIMAS de animación para un motor de video. Debes decidir el tiempo por foto, el factor de zoom y las coordenadas de paneo. ESTRICTAMENTE PROHIBIDO usar markdown o texto de relleno. DEBES devolver UNICAMENTE un objeto JSON válido con esta estructura exacta: { \"emocion_detectada\": \"str\", \"duracion_clip_segundos\": float, \"zoom_inicial\": float (ej. 1.0), \"zoom_final\": float (ej. 1.5), \"matematica_zoompan_x\": \"str (ej. 'iw/2-(iw/zoom/2)')\", \"matematica_zoompan_y\": \"str\", \"explicacion_decisiones\": \"str\" }",
+  director: `Eres Tupia MODO DIRECTOR DE CINE. Recibirás una temática del usuario. Tu trabajo es escribir un guion para un Short/Reel impactante.
+⚠️ DEBES DEVOLVER ÚNICA Y EXCLUSIVAMENTE UN ARRAY JSON VÁLIDO. SIN TEXTO ANTES NI DESPUÉS. ⚠️
+El JSON debe tener esta estructura exacta para al menos 3 escenas:
+[
+  {
+    "id": 0,
+    "guion_voz": "Frase gancho que dirá el narrador en esta escena.",
+    "texto_pantalla": "TÍTULO VIRAL",
+    "efecto_camara": "zoom_in_3d",
+    "duracion": 4
+  },
+  {
+    "id": 1,
+    "guion_voz": "Siguiente parte del guion, manteniendo la retención alta.",
+    "texto_pantalla": "EL SECRETO",
+    "efecto_camara": "zoom_out_3d",
+    "duracion": 4
+  }
+]
+Efectos permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right_3d", "pan_left_3d".`,
   youtube: "Eres Tupia MODO YOUTUBE. Eres un experto en retención de audiencia y el algoritmo de YouTube. Creas Títulos Virales y Ganchos (Hooks) irresistibles para los primeros 15 segundos.",
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
 };
 
-// 🔥 NORMALIZADOR UNIVERSAL MEJORADO (Límite de tamaño para celulares) 🔥
-const normalizeImageToJPG = (file) => {
+const generateOpenAITTS = async (text, apiKey) => {
+  const response = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'tts-1',
+      voice: 'alloy',
+      input: text
+    })
+  });
+  if (!response.ok) throw new Error("Fallo al generar la Voz IA con OpenAI");
+  return await response.blob();
+};
+
+const createTikTokFrame = (file, textOverlay) => {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-      
-      const MAX_SIZE = 2500;
-      if (width > MAX_SIZE || height > MAX_SIZE) {
-        const ratio = Math.min(MAX_SIZE / width, MAX_SIZE / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1080;
+      canvas.height = 1920;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = "#0a0a0a";
+      ctx.fillRect(0, 0, 1080, 1920);
+
+      const scale = Math.max(1080 / img.width, 1920 / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const x = (1080 - w) / 2;
+      const y = (1920 - h) / 2;
+
+      ctx.drawImage(img, x, y, w, h);
+
+      if (textOverlay) {
+        ctx.font = "bold 95px 'Arial Black', Impact, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 15;
+        ctx.strokeStyle = "black";
+        ctx.fillStyle = "#FF0050"; 
+        
+        ctx.shadowColor = "rgba(0,0,0,0.9)";
+        ctx.shadowBlur = 25;
+        ctx.shadowOffsetX = 8;
+        ctx.shadowOffsetY = 8;
+
+        const lines = textOverlay.split('\\n');
+        lines.forEach((line, i) => {
+           const yPos = 960 + (i * 110) - ((lines.length-1)*55);
+           ctx.strokeText(line, 540, yPos);
+           ctx.fillText(line, 540, yPos);
+           ctx.fillStyle = "#00F2FE"; 
+           ctx.fillText(line, 535, yPos - 5);
+           ctx.fillStyle = "white";
+           ctx.fillText(line, 540, yPos);
+        });
       }
 
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(img, 0, 0, width, height);
       canvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
         resolve(blob);
       }, 'image/jpeg', 0.95);
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Error al normalizar la imagen " + file.name));
-    };
+    img.onerror = () => reject(new Error("Error procesando frame"));
     img.src = url;
   });
 };
@@ -98,17 +153,17 @@ export default function AppUI() {
   const [activeTab, setActiveTab] = useState('chat');
   const [isSaved, setIsSaved] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [activeModel, setActiveModel] = useState('deepseek'); 
-  const [specificModel, setSpecificModel] = useState('deepseek-chat'); 
-  const [activePersona, setActivePersona] = useState('default');
   
-  // 🔥 NUEVOS ESTADOS DEL EDITOR DE VIDEO 🔥
+  const [activeModel, setActiveModel] = useState('openai'); 
+  const [specificModel, setSpecificModel] = useState('gpt-4o-mini'); 
+  const [activePersona, setActivePersona] = useState('director');
+  
   const [videoFiles, setVideoFiles] = useState([]);
-  const [audioFile, setAudioFile] = useState(null); // Estado para la música
-  const [videoFormat, setVideoFormat] = useState('horizontal'); // Selector de Formato
+  const [audioFile, setAudioFile] = useState(null);
+  const [directorPlan, setDirectorPlan] = useState(null); 
 
   const [isRendering, setIsRendering] = useState(false);
-  const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para cargar clips.");
+  const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para magia.");
   const [videoResult, setVideoResult] = useState(null);
   
   const ffmpegRef = useRef(null);
@@ -116,18 +171,20 @@ export default function AppUI() {
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
-  useEffect(() => {
-    if (MODEL_VERSIONS[activeModel]) setSpecificModel(MODEL_VERSIONS[activeModel][0].id);
+  useEffect(() => { 
+    if (MODEL_VERSIONS[activeModel]) {
+      setSpecificModel(MODEL_VERSIONS[activeModel][0].id);
+    }
   }, [activeModel]);
 
   useEffect(() => {
     const loadedKeys = {
-      gemini: localStorage.getItem('key_gemini') || '',
+      gemini: localStorage.getItem('key_gemini') || '', 
       openai: localStorage.getItem('key_openai') || '',
-      claude: localStorage.getItem('key_claude') || '',
+      claude: localStorage.getItem('key_claude') || '', 
       deepseek: localStorage.getItem('key_deepseek') || '',
-      alibaba: localStorage.getItem('key_alibaba') || '',
-      nvidia: localStorage.getItem('key_nvidia') || '',
+      alibaba: localStorage.getItem('key_alibaba') || '', 
+      nvidia: localStorage.getItem('key_nvidia') || '', 
       ghl: localStorage.getItem('key_ghl') || ''
     };
     setKeys(loadedKeys);
@@ -138,9 +195,8 @@ export default function AppUI() {
       setChats(parsedChats);
       const savedCurrentId = localStorage.getItem('tupia_current_chat');
       setCurrentChatId(savedCurrentId && parsedChats.find(c => c.id === savedCurrentId) ? savedCurrentId : parsedChats[0].id);
-      addLog("[OK] Historial de salas restaurado.");
-    } else {
-      createNewChat();
+    } else { 
+      createNewChat(); 
     }
   }, []);
 
@@ -151,30 +207,33 @@ export default function AppUI() {
     }
   }, [chats, currentChatId]);
 
-  useEffect(() => {
+  useEffect(() => { 
     if (activeTab === 'chat' && chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' }); 
     }
   }, [chats, currentChatId, activeTab]);
 
   const createNewChat = () => {
     const newId = Date.now().toString();
     setChats(prev => [{ id: newId, title: "Nuevo Chat", messages: [] }, ...prev]);
-    setCurrentChatId(newId);
+    setCurrentChatId(newId); 
     setIsSidebarOpen(false);
   };
 
   const deleteChat = (id) => {
     if (window.confirm("¿Seguro que quieres borrar este chat?")) {
       const newChats = chats.filter(c => c.id !== id);
-      if (newChats.length === 0) createNewChat();
-      else { setChats(newChats); if (currentChatId === id) setCurrentChatId(newChats[0].id); }
+      if (newChats.length === 0) createNewChat(); 
+      else { 
+        setChats(newChats); 
+        if (currentChatId === id) setCurrentChatId(newChats[0].id); 
+      }
     }
   };
 
   const saveSettings = () => {
     Object.entries(keys).forEach(([provider, key]) => localStorage.setItem(`key_${provider}`, key));
-    setIsSaved(true);
+    setIsSaved(true); 
     addLog("[INFO] APIs y CRM guardados en la bóveda.");
     setTimeout(() => setIsSaved(false), 2000);
   };
@@ -202,34 +261,26 @@ export default function AppUI() {
   const handleStudioMedia = (e) => {
     const files = Array.from(e.target.files);
     setVideoFiles(prev => [...prev, ...files.map(f => ({ file: f, name: f.name, id: Date.now() + Math.random() }))]);
-    setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: SOPORTE DE FORMATO + MÚSICA DE FONDO 🚀
   const runFfmpegRender = async () => {
-    if (videoFiles.length === 0) {
-      alert("Sube algunas imágenes al Estudio primero para poder procesar.");
-      return;
+    if (videoFiles.length === 0) { 
+      alert("Sube imágenes al Estudio primero."); 
+      return; 
     }
     
-    setIsRendering(true);
+    setIsRendering(true); 
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor FFmpeg integrado de Vite...");
+    setFfmpegLog("[INFO] Despertando al motor Director de Tupia...");
 
     try {
-      if (!ffmpegRef.current) {
-        ffmpegRef.current = new FFmpeg();
-      }
-      
+      if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg();
       const ffmpeg = ffmpegRef.current;
 
-      ffmpeg.on('log', ({ message }) => {
-        setFfmpegLog(prev => `${prev}\n[FFMPEG] ${message}`);
-      });
+      ffmpeg.on('log', ({ message }) => setFfmpegLog(prev => `${prev}\n[FFMPEG] ${message}`));
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y descargando núcleos vía Blob (ESM)...`);
-        
+        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y núcleos remotos (ESM)...`);
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
         await ffmpeg.load({
           coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
@@ -237,53 +288,57 @@ export default function AppUI() {
         });
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Escribiendo fotos (Normalizando a JPG perfecto)...`);
+      let usarVozIA = false;
+      if (directorPlan && keys.openai) {
+        setFfmpegLog(prev => `${prev}\n[INFO] 🎙️ Contactando a OpenAI para generar Voz Humana Realista...`);
+        const fullScript = directorPlan.map(p => p.guion_voz).join(". ");
+        const ttsBlob = await generateOpenAITTS(fullScript, keys.openai);
+        await ffmpeg.writeFile('voz_ia.mp3', await fetchFile(ttsBlob));
+        usarVozIA = true;
+      }
 
+      setFfmpegLog(prev => `${prev}\n[INFO] ✍️ Dibujando Capas de Texto y Normalizando Imágenes...`);
       for (let i = 0; i < videoFiles.length; i++) {
-        const jpgBlob = await normalizeImageToJPG(videoFiles[i].file);
-        const fileData = await fetchFile(jpgBlob);
-        await ffmpeg.writeFile(`img${i}.jpg`, fileData);
+        const textoIA = directorPlan && directorPlan[i] ? directorPlan[i].texto_pantalla : null;
+        const jpgBlob = await createTikTokFrame(videoFiles[i].file, textoIA);
+        await ffmpeg.writeFile(`img${i}.jpg`, await fetchFile(jpgBlob));
       }
 
-      // 🔥 ESCRIBIR MÚSICA SI EL USUARIO SUBIÓ UNA 🔥
       if (audioFile) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Cargando y procesando pista de música...`);
-        const audioData = await fetchFile(audioFile);
-        await ffmpeg.writeFile('musica_fondo.mp3', audioData);
+        setFfmpegLog(prev => `${prev}\n[INFO] 🎵 Cargando música de fondo...`);
+        await ffmpeg.writeFile('musica_fondo.mp3', await fetchFile(audioFile));
       }
 
-      // 🔥 CONFIGURACIÓN DINÁMICA DE FORMATO Y TIEMPO 🔥
-      const width = videoFormat === 'horizontal' ? 1920 : 1080;
-      const height = videoFormat === 'horizontal' ? 1080 : 1920;
-      
-      const segundosPorFoto = 5;
+      setFfmpegLog(prev => `${prev}\n[INFO] 🎥 Calculando Efectos de Cámara (3D Zoom Pro)...`);
       const fps = 30;
-      const frames = segundosPorFoto * fps;
-      const duracionTotal = videoFiles.length * segundosPorFoto;
-
-      setFfmpegLog(prev => `${prev}\n[INFO] Aplicando Magia Cinematográfica (${width}x${height} - ${duracionTotal}s)...`);
-
+      let duracionTotal = 0;
       let ffmpegArgs = [];
       let filterComplex = "";
-      
-      // 1. Agregar las imágenes
-      for (let i = 0; i < videoFiles.length; i++) {
-        ffmpegArgs.push('-i', `img${i}.jpg`);
-        // Escala respetando el formato elegido (Horizontal/Vertical) con Zoom Lento
-        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${width}x${height}:fps=${fps}[v${i}];`;
-      }
-
-      // 2. Agregar la pista de música si existe
-      if (audioFile) {
-        ffmpegArgs.push('-i', 'musica_fondo.mp3');
-      }
-
-      // 3. Unir (Concatenar) los clips de video
       let concatInputs = "";
+
       for (let i = 0; i < videoFiles.length; i++) {
+        const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 4;
+        const clipEfecto = directorPlan && directorPlan[i] ? directorPlan[i].efecto_camara : "zoom_in_3d";
+        const frames = Math.round(clipDur * fps);
+        duracionTotal += clipDur;
+
+        ffmpegArgs.push('-i', `img${i}.jpg`);
+
+        let cameraFX = "";
+        if (clipEfecto === 'zoom_in_3d') {
+          cameraFX = `zoompan=z='min(zoom+0.002,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1200x2133,rotate=0.03*sin(t):ow=1200:oh=2133:c=black`;
+        } else if (clipEfecto === 'zoom_out_3d') {
+          cameraFX = `zoompan=z='1.2-0.0015*in':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1200x2133,rotate=-0.02*sin(t):ow=1200:oh=2133:c=black`;
+        } else if (clipEfecto === 'pan_right_3d') {
+          cameraFX = `zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*3':y='ih/2-(ih/zoom/2)':s=1200x2133,rotate=0.015*sin(t):ow=1200:oh=2133:c=black`;
+        } else {
+          cameraFX = `zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*3':y='ih/2-(ih/zoom/2)':s=1200x2133,rotate=-0.015*sin(t):ow=1200:oh=2133:c=black`;
+        }
+
+        filterComplex += `[${i}:v]scale=1200:2133:force_original_aspect_ratio=increase,crop=1200:2133,${cameraFX},crop=1080:1920,setsar=1/1[v${i}];`;
         concatInputs += `[v${i}]`;
       }
-      
+
       if (videoFiles.length > 1) {
           filterComplex += `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`;
           ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]');
@@ -292,41 +347,41 @@ export default function AppUI() {
           ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
       }
 
-      // 4. Mapear y procesar la música (si existe)
-      if (audioFile) {
-        const audioInputIndex = videoFiles.length; // Si hay 3 fotos, el audio es el input número 3
-        ffmpegArgs.push('-map', `${audioInputIndex}:a`);
-        ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
+      let numInputs = videoFiles.length;
+      if (usarVozIA && audioFile) {
+         ffmpegArgs.push('-i', 'voz_ia.mp3', '-i', 'musica_fondo.mp3');
+         ffmpegArgs.push('-filter_complex', `[${numInputs}:a]volume=1.0[voz];[${numInputs+1}:a]volume=0.15[fondo];[voz][fondo]amix=inputs=2:duration=first[outa]`);
+         ffmpegArgs.push('-map', '[outa]');
+      } else if (usarVozIA) {
+         ffmpegArgs.push('-i', 'voz_ia.mp3', '-map', `${numInputs}:a`);
+      } else if (audioFile) {
+         ffmpegArgs.push('-i', 'musica_fondo.mp3', '-map', `${numInputs}:a`);
       }
 
-      // 5. Opciones finales de compresión y corte
       ffmpegArgs.push(
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
-        '-t', `${duracionTotal}`, // Obliga a que la música y el video se corten exactamente al mismo tiempo
-        'output.mp4'
+        '-t', `${duracionTotal}`
       );
+      if (usarVozIA || audioFile) ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
+      ffmpegArgs.push('output.mp4');
 
+      setFfmpegLog(prev => `${prev}\n[INFO] Renderizando (Esto toma tiempo por los efectos 3D)...`);
       const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
 
-      if (codigoRetorno !== 0) {
-        throw new Error("FFmpeg chocó durante la conversión (Código " + codigoRetorno + ").");
-      }
-
-      setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4 final...`);
+      if (codigoRetorno !== 0) throw new Error("FFmpeg chocó (Código " + codigoRetorno + ").");
 
       const data = await ffmpeg.readFile('output.mp4');
-      const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
-      const videoUrl = URL.createObjectURL(videoBlob);
+      const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
 
       setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado hermosamente (${duracionTotal}s).`);
+      setFfmpegLog(prev => `${prev}\n✅ ¡OBRA MAESTRA LISTA! Duración: ${duracionTotal}s.`);
 
     } catch (error) {
-      console.error(error);
-      setFfmpegLog(prev => `${prev}\n❌ ERROR DETECTADO: ${error?.message || error}`);
-    } finally {
-      setIsRendering(false);
+      console.error(error); 
+      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
+    } finally { 
+      setIsRendering(false); 
     }
   };
 
@@ -343,45 +398,36 @@ export default function AppUI() {
   };
 
   const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
-  const currentMessages = activeChat.messages;
-
-  const updateCurrentChatMessages = (newMsgs, newTitle = null) => {
-    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMsgs, title: newTitle || chat.title } : chat));
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if ((!input.trim() && attachments.length === 0) || isLoading) return;
 
     const currentKey = keys[activeModel];
-    if (!currentKey) {
-      alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`);
-      setActiveTab('settings'); return;
+    if (!currentKey) { 
+      alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`); 
+      setActiveTab('settings'); 
+      return; 
     }
 
-    const textFiles = attachments.filter(a => a.type === 'text');
     let finalInput = input;
+    const textFiles = attachments.filter(a => a.type === 'text');
     if (textFiles.length > 0) {
       finalInput += "\n\n" + textFiles.map(a => `--- ARCHIVO: ${a.name} ---\n${a.data}\n--- FIN DE ARCHIVO ---`).join('\n\n');
     }
     const images = attachments.filter(a => a.type === 'image');
-    
+
     const displayUserText = input + (attachments.length > 0 ? `\n[+ ${attachments.length} archivos]` : '');
-    const newMessages = [...currentMessages, { role: 'user', content: displayUserText, rawContent: finalInput }];
+    const newMessages = [...activeChat.messages, { role: 'user', content: displayUserText, rawContent: finalInput }];
     
-    let chatTitle = activeChat.title;
-    if (currentMessages.length === 0 && input.trim() !== "") {
-      chatTitle = input.substring(0, 30) + (input.length > 30 ? '...' : '');
-    }
-
-    updateCurrentChatMessages(newMessages, chatTitle);
-    setInput(""); setAttachments([]); setIsLoading(true);
-    addLog(`Enviando a ${specificModel} (Modo: ${activePersona})...`);
-
-    const history = currentMessages.slice(-10).map(m => ({ role: m.role, content: m.rawContent || m.content }));
-    const systemInstruction = PERSONAS[activePersona];
+    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMessages } : chat));
+    setInput(""); 
+    setIsLoading(true);
+    addLog(`Consultando al ${activePersona}...`);
 
     try {
+      const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
+      
       let botReply = "";
 
       if (activeModel === 'gemini') {
@@ -391,7 +437,7 @@ export default function AppUI() {
         
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${specificModel}:generateContent?key=${currentKey}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ system_instruction: { parts: [{ text: systemInstruction }] }, contents: [...geminiHistory, { role: 'user', parts: currentParts }] })
+          body: JSON.stringify({ system_instruction: { parts: [{ text: PERSONAS[activePersona] }] }, contents: [...geminiHistory, { role: 'user', parts: currentParts }] })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error.message);
@@ -404,7 +450,7 @@ export default function AppUI() {
 
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': currentKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-          body: JSON.stringify({ model: specificModel, max_tokens: 4096, system: systemInstruction, messages: [...claudeHistory, { role: 'user', content: currentContent }] })
+          body: JSON.stringify({ model: specificModel, max_tokens: 4096, system: PERSONAS[activePersona], messages: [...claudeHistory, { role: 'user', content: currentContent }] })
         });
         const data = await res.json();
         if (data.type === 'error') throw new Error(data.error.message);
@@ -428,7 +474,7 @@ export default function AppUI() {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
           body: JSON.stringify({ 
             model: specificModel, 
-            messages: [{ role: 'system', content: systemInstruction }, ...standardHistory, { role: 'user', content: currentContent }] 
+            messages: [{ role: 'system', content: PERSONAS[activePersona] }, ...standardHistory, { role: 'user', content: currentContent }] 
           })
         });
         const data = await res.json();
@@ -438,29 +484,30 @@ export default function AppUI() {
 
       if (activePersona === 'director') {
         try {
-          const config = JSON.parse(botReply);
-          botReply = `🎬 **Instrucciones Cinematográficas Calculadas:**\n\n` +
-                     `- **Ritmo Emocional:** ${config.emocion_detectada}\n` +
-                     `- **Velocidad de Corte:** ${config.duracion_clip_segundos}s\n` +
-                     `- **Fuerza del Zoom:** ${config.zoom_inicial}x ➔ ${config.zoom_final}x\n` +
-                     `- **Eje X (Matemática):** \`${config.matematica_zoompan_x}\`\n` +
-                     `- **Eje Y (Matemática):** \`${config.matematica_zoompan_y}\`\n\n` +
-                     `*💬 Nota de Dirección:* ${config.explicacion_decisiones}`;
-        } catch (e) {}
+          const jsonMatch = botReply.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const plan = JSON.parse(jsonMatch[0]);
+            setDirectorPlan(plan);
+            botReply = `🎬 **¡Guion y Dirección Listos!**\nHe configurado el Estudio con ${plan.length} escenas.\n\n` +
+                       plan.map(p => `📽️ **Escena ${p.id + 1} (${p.duracion}s)**\n*Voz:* "${p.guion_voz}"\n*Texto:* ${p.texto_pantalla}\n*Cámara:* ${p.efecto_camara}`).join('\n\n') +
+                       `\n\n👉 ¡Ve a la pestaña ESTUDIO, sube tus fotos y dale a Compilar!`;
+          }
+        } catch (e) {
+          console.error("Fallo parseando Director", e);
+        }
       }
 
-      updateCurrentChatMessages([...newMessages, { role: 'assistant', content: botReply }]);
+      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: botReply }] } : chat));
     } catch (error) {
-      updateCurrentChatMessages([...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }]);
-    } finally {
-      setIsLoading(false);
+      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
+    } finally { 
+      setIsLoading(false); 
+      setAttachments([]);
     }
   };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden">
-      
-      {/* HEADER */}
       <header className="p-3 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10 shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={() => setIsSidebarOpen(true)} className="text-2xl text-gray-300 hover:text-white px-2 rounded hover:bg-gray-800 transition">☰</button>
@@ -469,7 +516,6 @@ export default function AppUI() {
         <button onClick={createNewChat} className="bg-blue-600/30 text-blue-400 border border-blue-800/50 px-3 py-1 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-colors">➕ Nuevo</button>
       </header>
 
-      {/* SIDEBAR */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-black/80 z-50 flex animate-in fade-in duration-200">
           <div className="w-4/5 max-w-sm bg-gray-950 h-full border-r border-gray-800 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
@@ -490,21 +536,17 @@ export default function AppUI() {
         </div>
       )}
 
-      {/* CUERPO CENTRAL */}
       <main className="flex-1 overflow-y-auto pb-48 relative">
-        
-        {/* TAB 1: CHAT */}
         {activeTab === 'chat' && (
           <div className="p-4 space-y-4">
-            {currentMessages.length === 0 && (
+            {activeChat.messages.length === 0 && (
               <div className="text-center text-gray-500 mt-10 bg-gray-900 border border-gray-800 p-6 rounded-2xl">
                 <span className="text-5xl block mb-4">🧩</span>
                 <p className="font-bold text-gray-300">El Método PTB + Editor</p>
                 <p className="text-sm mt-2">Usa Plan 🗺️ ➔ Think 🤔 ➔ Build 🏗️ o cambia al Director de Cine 🎬</p>
               </div>
             )}
-            
-            {currentMessages.map((msg, i) => (
+            {activeChat.messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[90%] p-4 rounded-2xl text-sm shadow-md ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-gray-900 text-gray-100 border border-gray-700 rounded-bl-sm w-full'}`}>
                   {msg.role === 'assistant' && (
@@ -519,53 +561,33 @@ export default function AppUI() {
                 </div>
               </div>
             ))}
-            {isLoading && <div className="p-3 rounded-2xl bg-gray-800 border border-gray-700 text-gray-400 animate-pulse text-sm max-w-[50%]">Pensando...</div>}
+            {isLoading && <div className="p-3 bg-gray-800 animate-pulse text-sm w-1/2 rounded-xl">Pensando...</div>}
             <div ref={chatBottomRef} />
           </div>
         )}
 
-        {/* TAB 2: ESTUDIO DE VIDEO */}
         {activeTab === 'studio' && (
           <div className="p-6 space-y-6">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center gap-2 text-red-400">
-              <span>🎬</span> Tupia Video Engine
-            </h2>
+            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-red-400">🎬 Tupia AI Video Director</h2>
             
-            {/* 🔥 NUEVOS CONTROLES DE FORMATO 🔥 */}
-            <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1">
-              <button
-                onClick={() => setVideoFormat('horizontal')}
-                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
-              >
-                🖥️ Horizontal (16:9)
-              </button>
-              <button
-                onClick={() => setVideoFormat('vertical')}
-                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
-              >
-                📱 Vertical (9:16)
-              </button>
-            </div>
+            {directorPlan && (
+              <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
+                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} escenas detectadas.</span>
+                <p className="text-xs text-gray-400 mt-1">El motor generará Voz IA, insertará textos tipo TikTok y aplicará efectos de cámara 3D CapCut.</p>
+              </div>
+            )}
 
-            {/* 🔥 NUEVOS CONTROLES DE MEDIOS 🔥 */}
             <div className="flex gap-4 w-full">
-              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-red-500/40 transition-colors" onClick={() => document.getElementById('studio-upload').click()}>
-                <span className="text-4xl mb-2">🎞️</span>
-                <span className="text-sm font-bold text-gray-300">Imágenes</span>
-                <span className="text-[10px] text-gray-500 mt-1">Fotos Base</span>
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-red-500/40" onClick={() => document.getElementById('studio-upload').click()}>
+                <span className="text-4xl mb-2">🎞️</span><span className="text-sm font-bold text-gray-300">Imágenes</span>
                 <input id="studio-upload" type="file" multiple className="hidden" accept="image/*" onChange={handleStudioMedia} />
               </div>
-
-              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => document.getElementById('audio-upload').click()}>
-                <span className="text-4xl mb-2">🎵</span>
-                <span className="text-sm font-bold text-gray-300">{audioFile ? "Pista Lista" : "Música"}</span>
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500/40" onClick={() => document.getElementById('audio-upload').click()}>
+                <span className="text-4xl mb-2">🎵</span><span className="text-sm font-bold text-gray-300">{audioFile ? "Pista Lista" : "Música Fondo"}</span>
                 <span className="text-[10px] text-gray-500 mt-1 truncate max-w-full px-2">{audioFile ? audioFile.name : "Opcional (.mp3)"}</span>
                 <input id="audio-upload" type="file" className="hidden" accept="audio/*" onChange={(e) => setAudioFile(e.target.files[0])} />
                 {audioFile && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); document.getElementById('audio-upload').value = ""; }}
-                    className="mt-2 text-[10px] bg-red-600/30 text-red-400 px-3 py-1 rounded-full hover:bg-red-600 hover:text-white"
-                  >
+                  <button onClick={(e) => { e.stopPropagation(); setAudioFile(null); document.getElementById('audio-upload').value = ""; }} className="mt-2 text-[10px] bg-red-600/30 text-red-400 px-3 py-1 rounded-full hover:bg-red-600 hover:text-white">
                     Quitar
                   </button>
                 )}
@@ -576,45 +598,37 @@ export default function AppUI() {
               <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
                 <p className="text-xs font-bold text-gray-400 mb-2">Secuencia Visual ({videoFiles.length} clips):</p>
                 <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                  {videoFiles.map((f, i) => (
-                    <div key={f.id} className="bg-gray-900 p-2 rounded-lg text-xs truncate flex justify-between items-center border border-gray-800">
+                  {videoFiles.map(f => (
+                    <div key={f.id} className="bg-gray-900 p-2 rounded-lg text-xs flex justify-between border border-gray-800">
                       <span className="truncate flex-1 text-gray-300">{f.name}</span>
-                      <button onClick={() => setVideoFiles(prev => prev.filter(item => item.id !== f.id))} className="text-red-500 font-bold ml-2">X</button>
+                      <button onClick={() => setVideoFiles(prev => prev.filter(item => item.id !== f.id))} className="text-red-500 ml-2">X</button>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            <button onClick={runFfmpegRender} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2 ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600 text-white disabled:opacity-50'}`}>
-              {isRendering ? "⚙️ Renderizando Magia..." : "🎬 Compilar Video"}
+            <button onClick={runFfmpegRender} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
+              {isRendering ? "⚙️ Renderizando Magia 3D..." : "🎬 Compilar Superproducción"}
             </button>
 
             {videoResult && (
-              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-2xl">
+              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700">
                 <h3 className="text-sm font-bold text-green-400 mb-3 flex items-center gap-2">✅ Video Generado</h3>
-                <video src={videoResult} controls className={`w-full rounded-lg bg-black object-contain shadow-inner ${videoFormat === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]'}`} />
-                <a href={videoResult} download="Tupia_Cinematic_Video.mp4" className="mt-4 w-full block text-center bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl transition-colors">
-                  💾 Descargar MP4
-                </a>
+                <video src={videoResult} controls className="w-full rounded-lg bg-black aspect-[9/16]" />
+                <a href={videoResult} download="Tupia_Director_Video.mp4" className="mt-4 w-full block text-center bg-green-600 py-3 rounded-xl font-bold">💾 Descargar MP4</a>
               </div>
             )}
-
-            <div className="bg-black border border-gray-800 p-4 rounded-xl font-mono text-xs text-red-400 h-40 overflow-y-auto shadow-inner whitespace-pre-wrap">
-              <p>{ffmpegLog}</p>
-            </div>
+            <div className="bg-black border border-gray-800 p-4 rounded-xl font-mono text-xs text-red-400 h-40 overflow-y-auto whitespace-pre-wrap">{ffmpegLog}</div>
           </div>
         )}
 
-        {/* TAB 3: BÓVEDA */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-4">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de APIs</h2>
             {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
               <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800">
-                <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">
-                  {id === 'ghl' ? 'GoHighLevel (CRM)' : id}
-                </label>
+                <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">{id === 'ghl' ? 'GoHighLevel (CRM)' : id}</label>
                 <input type="password" value={keys[id]} onChange={(e) => setKeys(prev => ({...prev, [id]: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-blue-500 text-sm" placeholder="Pega tu token aquí..." />
               </div>
             ))}
@@ -624,47 +638,43 @@ export default function AppUI() {
           </div>
         )}
 
-        {/* TAB 4: LOGS */}
         {activeTab === 'logs' && (
           <div className="p-4 h-full flex flex-col">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 mb-4">📋 Consola Técnica</h2>
             <div className="bg-black flex-1 rounded-xl p-4 font-mono text-xs text-green-400 overflow-y-auto border border-gray-800 pb-20">
-              {logs.map((log, i) => <p key={log} className="mb-2">{log}</p>)}
+              {logs.map((log, i) => <p key={i} className="mb-2">{log}</p>)}
             </div>
           </div>
         )}
       </main>
 
-      {/* PANEL DE ESCRITURA */}
       {activeTab === 'chat' && (
-        <div className="fixed bottom-[70px] left-0 w-full bg-gray-900 border-t border-gray-800 z-10 p-2 flex flex-col gap-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+        <div className="fixed bottom-[70px] left-0 w-full bg-gray-900 border-t border-gray-800 z-10 p-2 flex flex-col gap-2">
           <div className="grid grid-cols-3 gap-1">
             <select value={activeModel} onChange={(e) => setActiveModel(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-blue-400 font-bold rounded-lg p-2 outline-none">
+              <option value="openai">OpenAI (Recomendado para Director)</option>
               <option value="deepseek">DeepSeek</option>
-              <option value="openai">OpenAI</option>
               <option value="claude">Claude</option>
               <option value="gemini">Gemini</option>
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
             </select>
-
             <select value={specificModel} onChange={(e) => setSpecificModel(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-green-400 font-bold rounded-lg p-2 outline-none">
               {MODEL_VERSIONS[activeModel] && MODEL_VERSIONS[activeModel].map(m => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
-
-            <select value={activePersona} onChange={(e) => setActivePersona(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-purple-400 font-bold rounded-lg p-2 outline-none truncate">
+            <select value={activePersona} onChange={(e) => setActivePersona(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-purple-400 font-bold rounded-lg p-2 outline-none">
+              <option value="default">🗣️ Normal</option>
+              <option value="director">🎬 Director AI</option>
               <option value="plan">🗺️ Plan</option>
               <option value="think">🤔 Think</option>
               <option value="build">🏗️ Build</option>
-              <option value="director">🎬 Director</option>
-              <option value="default">🗣️ Normal</option>
               <option value="youtube">▶️ YouTube</option>
               <option value="infoproducto">📦 Venta</option>
             </select>
           </div>
-
+          
           {attachments.length > 0 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
               {attachments.map((file, idx) => (
@@ -679,13 +689,12 @@ export default function AppUI() {
           <form onSubmit={handleSubmit} className="flex gap-2 w-full">
             <button type="button" onClick={() => fileInputRef.current.click()} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 w-[50px] rounded-xl flex justify-center items-center">📎</button>
             <input type="file" multiple className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-            <input className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-blue-500 text-sm" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Instrucción..." />
+            <input className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ej: Crea un video sobre vender casas..." />
             <button type="submit" disabled={(!input.trim() && attachments.length===0) || isLoading} className="bg-blue-600 disabled:bg-gray-800 w-[50px] rounded-xl font-bold text-white">➤</button>
           </form>
         </div>
       )}
 
-      {/* MENÚ INFERIOR MÓVIL */}
       <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
         <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
         <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
