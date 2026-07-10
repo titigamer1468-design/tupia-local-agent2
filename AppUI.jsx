@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
+// 🔥 IMPORTACIÓN NATIVA: Vite empaquetará los Workers en tu dominio 🔥
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
 
 const MODEL_VERSIONS = {
   openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
@@ -67,7 +70,6 @@ export default function AppUI() {
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para cargar clips.");
   const [videoResult, setVideoResult] = useState(null);
   
-  // Ref vacío (se inicializará con la ventana del navegador)
   const ffmpegRef = useRef(null);
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '' });
 
@@ -162,7 +164,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: BYPASS NATIVO DE VITE Y CORS 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEO EN LA NUBE 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -171,12 +173,9 @@ export default function AppUI() {
     
     setIsRendering(true);
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor FFmpeg Nativo del Navegador...");
+    setFfmpegLog("[INFO] Despertando al motor FFmpeg integrado de Vite...");
 
     try {
-      const { FFmpeg } = window.FFmpegWASM;
-      const { fetchFile, toBlobURL } = window.FFmpegUtil;
-
       if (!ffmpegRef.current) {
         ffmpegRef.current = new FFmpeg();
       }
@@ -188,16 +187,13 @@ export default function AppUI() {
       });
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Bypass de CORS Activo)...`);
+        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local con núcleo remoto...`);
         
-        const coreURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-        const ffmpegURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/umd';
-        
+        // Al dejar que Vite empaquete el Wrapper, el Worker nace en tu dominio (Cero CORS).
+        // Y el Worker puede descargar los núcleos pesados libremente vía enlaces directos.
         await ffmpeg.load({
-          // 🔥 EL TRUCO DE MAGIA: Disfrazamos el Worker externo como si fuera interno 🔥
-          classWorkerURL: await toBlobURL(`${ffmpegURL}/814.ffmpeg.js`, 'text/javascript'),
-          coreURL: await toBlobURL(`${coreURL}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${coreURL}/ffmpeg-core.wasm`, 'application/wasm')
+          coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+          wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
         });
       }
 
