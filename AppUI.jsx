@@ -22,6 +22,33 @@ const PERSONAS = {
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
 };
 
+// 🔥 NUEVO: NORMALIZADOR UNIVERSAL DE IMÁGENES 🔥
+const normalizeImageToJPG = (file) => {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      // Fondo negro por si la imagen es un PNG con transparencia
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      }, 'image/jpeg', 0.95);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Error al normalizar la imagen " + file.name));
+    };
+    img.src = url;
+  });
+};
+
 const CodeBlock = ({ lang, code }) => {
   const handleCopy = () => navigator.clipboard.writeText(code.trim());
   const handleDownload = () => {
@@ -189,25 +216,26 @@ export default function AppUI() {
       if (!ffmpeg.loaded) {
         setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y descargando núcleos vía Blob (ESM)...`);
         
-        // 🔥 EL CAMBIO ESTÁ AQUÍ: dist/esm en lugar de dist/umd 🔥
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-        
         await ffmpeg.load({
           coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
           wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
         });
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Escribiendo fotos en memoria virtual...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Escribiendo fotos (Normalizando a JPG perfecto)...`);
 
       for (let i = 0; i < videoFiles.length; i++) {
-        const fileData = await fetchFile(videoFiles[i].file);
+        // 🔥 AQUÍ ENTRA EL NORMALIZADOR PARA PREVENIR ERRORES DE PNG/WEBP 🔥
+        const jpgBlob = await normalizeImageToJPG(videoFiles[i].file);
+        const fileData = await fetchFile(jpgBlob);
         await ffmpeg.writeFile(`img${i}.jpg`, fileData);
       }
 
       setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow (esto puede tomar unos segundos)...`);
 
-      await ffmpeg.exec([
+      // 🔥 EL CÓDIGO DE ERROR NOS AVISA SI FFmpeg CHOCA 🔥
+      const codigoRetorno = await ffmpeg.exec([
         '-framerate', '1/2', 
         '-i', 'img%d.jpg',   
         '-c:v', 'libx264',   
@@ -216,6 +244,10 @@ export default function AppUI() {
         '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
         'output.mp4'         
       ]);
+
+      if (codigoRetorno !== 0) {
+        throw new Error("FFmpeg chocó durante la conversión (Código " + codigoRetorno + "). Revisa los logs arriba.");
+      }
 
       setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4...`);
 
@@ -228,7 +260,7 @@ export default function AppUI() {
 
     } catch (error) {
       console.error(error);
-      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
+      setFfmpegLog(prev => `${prev}\n❌ ERROR DETECTADO: ${error?.message || error}`);
     } finally {
       setIsRendering(false);
     }
