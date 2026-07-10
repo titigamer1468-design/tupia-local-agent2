@@ -162,7 +162,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: BYPASS NATIVO DE VITE 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: BYPASS NATIVO DE VITE Y CORS 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -174,7 +174,6 @@ export default function AppUI() {
     setFfmpegLog("[INFO] Despertando al motor FFmpeg Nativo del Navegador...");
 
     try {
-      // Tomamos FFmpeg de la ventana (descargado por el HTML, no por Vite)
       const { FFmpeg } = window.FFmpegWASM;
       const { fetchFile, toBlobURL } = window.FFmpegUtil;
 
@@ -189,12 +188,16 @@ export default function AppUI() {
       });
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Bypass Activo)...`);
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Bypass de CORS Activo)...`);
+        
+        const coreURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        const ffmpegURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/umd';
         
         await ffmpeg.load({
-          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
+          // 🔥 EL TRUCO DE MAGIA: Disfrazamos el Worker externo como si fuera interno 🔥
+          classWorkerURL: await toBlobURL(`${ffmpegURL}/814.ffmpeg.js`, 'text/javascript'),
+          coreURL: await toBlobURL(`${coreURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${coreURL}/ffmpeg-core.wasm`, 'application/wasm')
         });
       }
 
