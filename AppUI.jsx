@@ -31,7 +31,6 @@ const normalizeImageToJPG = (file) => {
       let width = img.width;
       let height = img.height;
       
-      // Tope de seguridad: Redimensiona fotos gigantes (como esa de 13000px) para no crashear la memoria
       const MAX_SIZE = 2500;
       if (width > MAX_SIZE || height > MAX_SIZE) {
         const ratio = Math.min(MAX_SIZE / width, MAX_SIZE / height);
@@ -102,7 +101,12 @@ export default function AppUI() {
   const [activeModel, setActiveModel] = useState('deepseek'); 
   const [specificModel, setSpecificModel] = useState('deepseek-chat'); 
   const [activePersona, setActivePersona] = useState('default');
+  
+  // 🔥 NUEVOS ESTADOS DEL EDITOR DE VIDEO 🔥
   const [videoFiles, setVideoFiles] = useState([]);
+  const [audioFile, setAudioFile] = useState(null); // Estado para la música
+  const [videoFormat, setVideoFormat] = useState('horizontal'); // Selector de Formato
+
   const [isRendering, setIsRendering] = useState(false);
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para cargar clips.");
   const [videoResult, setVideoResult] = useState(null);
@@ -201,7 +205,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: KEN BURNS CINEMATOGRÁFICO DE 5 SEGUNDOS 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: SOPORTE DE FORMATO + MÚSICA DE FONDO 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -241,25 +245,40 @@ export default function AppUI() {
         await ffmpeg.writeFile(`img${i}.jpg`, fileData);
       }
 
-      // 🔥 ARTE MATEMÁTICA: 5 Segundos de Zoom Suave (150 frames a 30fps) 🔥
+      // 🔥 ESCRIBIR MÚSICA SI EL USUARIO SUBIÓ UNA 🔥
+      if (audioFile) {
+        setFfmpegLog(prev => `${prev}\n[INFO] Cargando y procesando pista de música...`);
+        const audioData = await fetchFile(audioFile);
+        await ffmpeg.writeFile('musica_fondo.mp3', audioData);
+      }
+
+      // 🔥 CONFIGURACIÓN DINÁMICA DE FORMATO Y TIEMPO 🔥
+      const width = videoFormat === 'horizontal' ? 1920 : 1080;
+      const height = videoFormat === 'horizontal' ? 1080 : 1920;
+      
       const segundosPorFoto = 5;
       const fps = 30;
       const frames = segundosPorFoto * fps;
       const duracionTotal = videoFiles.length * segundosPorFoto;
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Aplicando Ken Burns Cinematográfico (${duracionTotal}s en total)...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Aplicando Magia Cinematográfica (${width}x${height} - ${duracionTotal}s)...`);
 
       let ffmpegArgs = [];
       let filterComplex = "";
       
-      // Construimos el filtro dinámico para cada foto
+      // 1. Agregar las imágenes
       for (let i = 0; i < videoFiles.length; i++) {
         ffmpegArgs.push('-i', `img${i}.jpg`);
-        // Escala para llenar Vertical (1080x1920) y luego aplica un zoompan elegante y continuo por 5 segundos
-        filterComplex += `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=${fps}[v${i}];`;
+        // Escala respetando el formato elegido (Horizontal/Vertical) con Zoom Lento
+        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${width}x${height}:fps=${fps}[v${i}];`;
       }
 
-      // Concatenamos si hay más de 1 foto
+      // 2. Agregar la pista de música si existe
+      if (audioFile) {
+        ffmpegArgs.push('-i', 'musica_fondo.mp3');
+      }
+
+      // 3. Unir (Concatenar) los clips de video
       let concatInputs = "";
       for (let i = 0; i < videoFiles.length; i++) {
         concatInputs += `[v${i}]`;
@@ -269,22 +288,29 @@ export default function AppUI() {
           filterComplex += `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`;
           ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]');
       } else {
-          // Si es una sola foto, quitamos el punto y coma final
           filterComplex = filterComplex.slice(0, -1);
           ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
       }
 
-      // Empaquetamos la exportación
+      // 4. Mapear y procesar la música (si existe)
+      if (audioFile) {
+        const audioInputIndex = videoFiles.length; // Si hay 3 fotos, el audio es el input número 3
+        ffmpegArgs.push('-map', `${audioInputIndex}:a`);
+        ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
+      }
+
+      // 5. Opciones finales de compresión y corte
       ffmpegArgs.push(
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
+        '-t', `${duracionTotal}`, // Obliga a que la música y el video se corten exactamente al mismo tiempo
         'output.mp4'
       );
 
       const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
 
       if (codigoRetorno !== 0) {
-        throw new Error("FFmpeg chocó durante la conversión (Código " + codigoRetorno + "). Revisa los logs arriba.");
+        throw new Error("FFmpeg chocó durante la conversión (Código " + codigoRetorno + ").");
       }
 
       setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4 final...`);
@@ -504,18 +530,51 @@ export default function AppUI() {
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center gap-2 text-red-400">
               <span>🎬</span> Tupia Video Engine
             </h2>
-            <p className="text-xs text-gray-400 leading-relaxed">Motor V12 Single-Thread cargado. No necesita permisos de memoria y evita cualquier bloqueo en celulares.</p>
             
-            <div className="bg-gray-900 p-6 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-red-500/40 transition-colors" onClick={() => document.getElementById('studio-upload').click()}>
-              <span className="text-4xl mb-2">🎞️</span>
-              <span className="text-sm font-bold text-gray-300">Seleccionar Lote de Imágenes</span>
-              <span className="text-[10px] text-gray-500 mt-1">Soporta PNG, JPG, JPEG</span>
-              <input id="studio-upload" type="file" multiple className="hidden" accept="image/*" onChange={handleStudioMedia} />
+            {/* 🔥 NUEVOS CONTROLES DE FORMATO 🔥 */}
+            <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1">
+              <button
+                onClick={() => setVideoFormat('horizontal')}
+                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
+              >
+                🖥️ Horizontal (16:9)
+              </button>
+              <button
+                onClick={() => setVideoFormat('vertical')}
+                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
+              >
+                📱 Vertical (9:16)
+              </button>
+            </div>
+
+            {/* 🔥 NUEVOS CONTROLES DE MEDIOS 🔥 */}
+            <div className="flex gap-4 w-full">
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-red-500/40 transition-colors" onClick={() => document.getElementById('studio-upload').click()}>
+                <span className="text-4xl mb-2">🎞️</span>
+                <span className="text-sm font-bold text-gray-300">Imágenes</span>
+                <span className="text-[10px] text-gray-500 mt-1">Fotos Base</span>
+                <input id="studio-upload" type="file" multiple className="hidden" accept="image/*" onChange={handleStudioMedia} />
+              </div>
+
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => document.getElementById('audio-upload').click()}>
+                <span className="text-4xl mb-2">🎵</span>
+                <span className="text-sm font-bold text-gray-300">{audioFile ? "Pista Lista" : "Música"}</span>
+                <span className="text-[10px] text-gray-500 mt-1 truncate max-w-full px-2">{audioFile ? audioFile.name : "Opcional (.mp3)"}</span>
+                <input id="audio-upload" type="file" className="hidden" accept="audio/*" onChange={(e) => setAudioFile(e.target.files[0])} />
+                {audioFile && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setAudioFile(null); document.getElementById('audio-upload').value = ""; }}
+                    className="mt-2 text-[10px] bg-red-600/30 text-red-400 px-3 py-1 rounded-full hover:bg-red-600 hover:text-white"
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
             </div>
 
             {videoFiles.length > 0 && (
               <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-xs font-bold text-gray-400 mb-2">Cola de procesamiento ({videoFiles.length} archivos):</p>
+                <p className="text-xs font-bold text-gray-400 mb-2">Secuencia Visual ({videoFiles.length} clips):</p>
                 <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
                   {videoFiles.map((f, i) => (
                     <div key={f.id} className="bg-gray-900 p-2 rounded-lg text-xs truncate flex justify-between items-center border border-gray-800">
@@ -528,14 +587,14 @@ export default function AppUI() {
             )}
 
             <button onClick={runFfmpegRender} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2 ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600 text-white disabled:opacity-50'}`}>
-              {isRendering ? "⚙️ Renderizando Lote..." : "🎬 Compilar Lote en Video"}
+              {isRendering ? "⚙️ Renderizando Magia..." : "🎬 Compilar Video"}
             </button>
 
             {videoResult && (
               <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-2xl">
                 <h3 className="text-sm font-bold text-green-400 mb-3 flex items-center gap-2">✅ Video Generado</h3>
-                <video src={videoResult} controls className="w-full rounded-lg bg-black aspect-[9/16] object-contain shadow-inner" />
-                <a href={videoResult} download="Tupia_Faceless_Video.mp4" className="mt-4 w-full block text-center bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl transition-colors">
+                <video src={videoResult} controls className={`w-full rounded-lg bg-black object-contain shadow-inner ${videoFormat === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]'}`} />
+                <a href={videoResult} download="Tupia_Cinematic_Video.mp4" className="mt-4 w-full block text-center bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl transition-colors">
                   💾 Descargar MP4
                 </a>
               </div>
@@ -570,7 +629,7 @@ export default function AppUI() {
           <div className="p-4 h-full flex flex-col">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 mb-4">📋 Consola Técnica</h2>
             <div className="bg-black flex-1 rounded-xl p-4 font-mono text-xs text-green-400 overflow-y-auto border border-gray-800 pb-20">
-              {logs.map((log, i) => <p key={i} className="mb-2">{log}</p>)}
+              {logs.map((log, i) => <p key={log} className="mb-2">{log}</p>)}
             </div>
           </div>
         )}
