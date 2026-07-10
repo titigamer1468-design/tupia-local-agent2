@@ -164,7 +164,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEOS BLOB 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEOS BLOB (ESM) 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -187,11 +187,12 @@ export default function AppUI() {
       });
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y descargando núcleos vía Blob...`);
+        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y descargando núcleos vía Blob (ESM)...`);
         
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        // 🔥 EL CAMBIO ESTÁ AQUÍ: dist/esm en lugar de dist/umd 🔥
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+        
         await ffmpeg.load({
-          // 🔥 EL TRUCO MÁGICO: Disfrazamos los archivos de la nube como locales 🔥
           coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
           wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
         });
