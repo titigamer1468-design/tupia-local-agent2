@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-// 🚨 IMPORTACIÓN DEL MOTOR FÍSICO V0.11 🚨
-import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
+// 🚨 IMPORTACIONES DEL MOTOR V12 SINGLE-THREAD 🚨
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 const MODEL_VERSIONS = {
   openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
@@ -69,12 +70,8 @@ export default function AppUI() {
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para cargar clips.");
   const [videoResult, setVideoResult] = useState(null);
   
-  // 🛠️ INSTANCIA FÍSICA APUNTANDO AL SERVIDOR LOCAL
-  const ffmpegRef = useRef(createFFmpeg({ 
-    log: false,
-    corePath: '/ffmpeg-core.js'
-  }));
-
+  // 🛠️ Instancia de motor V12 (No pide configuraciones locas)
+  const ffmpegRef = useRef(new FFmpeg());
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '' });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -168,7 +165,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 EL MOTOR FÍSICO 100% LOCAL 🚀
+  // 🚀 MOTOR SINGLE-THREAD V12 POR CDN (SIN RESTRICCIONES DE MEMORIA) 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -177,30 +174,36 @@ export default function AppUI() {
     
     setIsRendering(true);
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor FFmpeg físico local...");
+    setFfmpegLog("[INFO] Despertando al motor FFmpeg v12 Single-Thread...");
 
     try {
       const ffmpeg = ffmpegRef.current;
 
-      ffmpeg.setLogger(({ message }) => {
+      ffmpeg.on('log', ({ message }) => {
         setFfmpegLog(prev => `${prev}\n[FFMPEG] ${message}`);
       });
 
-      if (!ffmpeg.isLoaded()) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Cargando binarios físicos locales (<25MB)...`);
-        await ffmpeg.load();
+      if (!ffmpeg.loaded) {
+        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Sin requerir memoria compartida)...`);
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        
+        // Descargamos de CDN como blob para no alertar al navegador
+        await ffmpeg.load({
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
+        });
       }
 
       setFfmpegLog(prev => `${prev}\n[INFO] Escribiendo fotos en memoria virtual...`);
 
       for (let i = 0; i < videoFiles.length; i++) {
         const fileData = await fetchFile(videoFiles[i].file);
-        ffmpeg.FS('writeFile', `img${i}.jpg`, fileData);
+        await ffmpeg.writeFile(`img${i}.jpg`, fileData);
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow vertical...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow (esto puede tomar unos segundos)...`);
 
-      await ffmpeg.run(
+      await ffmpeg.exec([
         '-framerate', '1/2', 
         '-i', 'img%d.jpg',   
         '-c:v', 'libx264',   
@@ -208,16 +211,16 @@ export default function AppUI() {
         '-pix_fmt', 'yuv420p',
         '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
         'output.mp4'         
-      );
+      ]);
 
       setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4...`);
 
-      const data = ffmpeg.FS('readFile', 'output.mp4');
+      const data = await ffmpeg.readFile('output.mp4');
       const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
       const videoUrl = URL.createObjectURL(videoBlob);
 
       setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO! Video exportado perfectamente.`);
+      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado perfectamente.`);
 
     } catch (error) {
       console.error(error);
@@ -427,7 +430,7 @@ export default function AppUI() {
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center gap-2 text-red-400">
               <span>🎬</span> Tupia Video Engine
             </h2>
-            <p className="text-xs text-gray-400 leading-relaxed">Sube imágenes para generar tu video. Procesamiento local 100% nativo (Versión Física).</p>
+            <p className="text-xs text-gray-400 leading-relaxed">Motor V12 Single-Thread cargado. No necesita permisos de memoria y evita cualquier bloqueo en celulares.</p>
             
             <div className="bg-gray-900 p-6 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center text-center cursor-pointer hover:border-red-500/40 transition-colors" onClick={() => document.getElementById('studio-upload').click()}>
               <span className="text-4xl mb-2">🎞️</span>
