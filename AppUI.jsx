@@ -175,7 +175,7 @@ export default function AppUI() {
 
     try {
       // Tomamos FFmpeg de la ventana (descargado por el HTML, no por Vite)
-      const { FFmpeg } = window.FFmpeg;
+      const { FFmpeg } = window.FFmpegWASM;
       const { fetchFile, toBlobURL } = window.FFmpegUtil;
 
       if (!ffmpegRef.current) {
