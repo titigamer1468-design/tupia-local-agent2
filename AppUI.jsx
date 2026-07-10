@@ -1,7 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-// 🚨 IMPORTACIONES DEL MOTOR V12 SINGLE-THREAD 🚨
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 const MODEL_VERSIONS = {
   openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
@@ -70,8 +67,8 @@ export default function AppUI() {
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Estudio de video preparado. Listo para cargar clips.");
   const [videoResult, setVideoResult] = useState(null);
   
-  // 🛠️ Instancia de motor V12 (No pide configuraciones locas)
-  const ffmpegRef = useRef(new FFmpeg());
+  // Ref vacío (se inicializará con la ventana del navegador)
+  const ffmpegRef = useRef(null);
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '' });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -165,7 +162,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR SINGLE-THREAD V12 POR CDN (SIN RESTRICCIONES DE MEMORIA) 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: BYPASS NATIVO DE VITE 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -174,9 +171,17 @@ export default function AppUI() {
     
     setIsRendering(true);
     setVideoResult(null);
-    setFfmpegLog("[INFO] Despertando al motor FFmpeg v12 Single-Thread...");
+    setFfmpegLog("[INFO] Despertando al motor FFmpeg Nativo del Navegador...");
 
     try {
+      // Tomamos FFmpeg de la ventana (descargado por el HTML, no por Vite)
+      const { FFmpeg } = window.FFmpeg;
+      const { fetchFile, toBlobURL } = window.FFmpegUtil;
+
+      if (!ffmpegRef.current) {
+        ffmpegRef.current = new FFmpeg();
+      }
+      
       const ffmpeg = ffmpegRef.current;
 
       ffmpeg.on('log', ({ message }) => {
@@ -184,10 +189,9 @@ export default function AppUI() {
       });
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Sin requerir memoria compartida)...`);
+        setFfmpegLog(prev => `${prev}\n[INFO] Descargando núcleo puro desde CDN (Bypass Activo)...`);
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
         
-        // Descargamos de CDN como blob para no alertar al navegador
         await ffmpeg.load({
           coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
           wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
