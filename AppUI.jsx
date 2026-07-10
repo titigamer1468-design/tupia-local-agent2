@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 // 🔥 IMPORTACIÓN NATIVA: Vite empaquetará los Workers en tu dominio 🔥
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 const MODEL_VERSIONS = {
   openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
@@ -164,7 +164,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEO EN LA NUBE 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + NÚCLEOS BLOB 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -187,13 +187,13 @@ export default function AppUI() {
       });
 
       if (!ffmpeg.loaded) {
-        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local con núcleo remoto...`);
+        setFfmpegLog(prev => `${prev}\n[INFO] Conectando Worker local y descargando núcleos vía Blob...`);
         
-        // Al dejar que Vite empaquete el Wrapper, el Worker nace en tu dominio (Cero CORS).
-        // Y el Worker puede descargar los núcleos pesados libremente vía enlaces directos.
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
         await ffmpeg.load({
-          coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-          wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
+          // 🔥 EL TRUCO MÁGICO: Disfrazamos los archivos de la nube como locales 🔥
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
         });
       }
 
@@ -557,11 +557,4 @@ export default function AppUI() {
 
       {/* MENÚ INFERIOR MÓVIL */}
       <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
-        <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
-        <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
-        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='settings'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">⚙️</span><span className="text-[9px] font-bold">BÓVEDA</span></button>
-        <button onClick={() => setActiveTab('logs')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='logs'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">📋</span><span className="text-[9px] font-bold">LOGS</span></button>
-      </nav>
-    </div>
-  );
-}
+        <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab
