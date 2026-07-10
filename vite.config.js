@@ -2,14 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [
-    react({
-      include: "**/*.{jsx,js,tsx,ts}",
-    }),
-  ],
-  build: {
-    rollupOptions: {
-      input: './index.html'
-    }
+  plugins: [react()],
+  // 🔥 ESTE ES EL ESCUDO PARA QUE VITE NO ROMPA FFMPEG 🔥
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
   }
 })
