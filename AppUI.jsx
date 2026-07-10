@@ -38,26 +38,30 @@ Efectos permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_left".`,
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
 };
 
-// 🔥 GENERADOR DE CAPAS (IMAGEN + TEXTO) 🔥
-const createTikTokFrame = (file, textOverlay, fontSize, textColor) => {
+// 🔥 GENERADOR DE CAPAS ADAPTATIVO (Horizontal/Vertical) 🔥
+const createFrame = (file, textOverlay, fontSize, textColor, format) => {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = 1080; 
-      canvas.height = 1920;
+      const isVertical = format === 'vertical';
+      const targetW = isVertical ? 1080 : 1920;
+      const targetH = isVertical ? 1920 : 1080;
+      
+      canvas.width = targetW; 
+      canvas.height = targetH;
       const ctx = canvas.getContext('2d');
       
       // Fondo oscuro para evitar bordes blancos
       ctx.fillStyle = "#050505"; 
-      ctx.fillRect(0, 0, 1080, 1920);
+      ctx.fillRect(0, 0, targetW, targetH);
       
       // Escalar imagen tipo Cover
-      const scale = Math.max(1080 / img.width, 1920 / img.height);
+      const scale = Math.max(targetW / img.width, targetH / img.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      ctx.drawImage(img, (1080 - w) / 2, (1920 - h) / 2, w, h);
+      ctx.drawImage(img, (targetW - w) / 2, (targetH - h) / 2, w, h);
       
       // Estampar Textos si la IA los generó
       if (textOverlay) {
@@ -74,10 +78,11 @@ const createTikTokFrame = (file, textOverlay, fontSize, textColor) => {
         ctx.shadowOffsetY = 5;
 
         const lines = textOverlay.split('\\n');
+        const centerY = targetH / 2;
         lines.forEach((line, i) => {
-           const yPos = 960 + (i * (parseInt(fontSize) + 20)) - ((lines.length - 1) * (parseInt(fontSize) / 2));
-           ctx.strokeText(line, 540, yPos);
-           ctx.fillText(line, 540, yPos);
+           const yPos = centerY + (i * (parseInt(fontSize) + 20)) - ((lines.length - 1) * (parseInt(fontSize) / 2));
+           ctx.strokeText(line, targetW / 2, yPos);
+           ctx.fillText(line, targetW / 2, yPos);
         });
       }
 
@@ -140,6 +145,7 @@ export default function AppUI() {
   const [directorPlan, setDirectorPlan] = useState(null); 
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
+  const [videoFormat, setVideoFormat] = useState('vertical'); // Horizontal/Vertical Toggle
   const [isRendering, setIsRendering] = useState(false);
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D listo para generar.");
   const [videoResult, setVideoResult] = useState(null);
@@ -246,10 +252,10 @@ export default function AppUI() {
         });
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] ✍️ Renderizando Textos y Lienzos...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] ✍️ Renderizando Textos y Lienzos (${videoFormat})...`);
       for (let i = 0; i < videoFiles.length; i++) {
         const textoIA = directorPlan && directorPlan[i] ? directorPlan[i].texto_pantalla : null;
-        const jpgBlob = await createTikTokFrame(videoFiles[i].file, textoIA, fontSize, textColor);
+        const jpgBlob = await createFrame(videoFiles[i].file, textoIA, fontSize, textColor, videoFormat);
         await ffmpeg.writeFile(`img${i}.jpg`, await fetchFile(jpgBlob));
       }
 
@@ -275,6 +281,13 @@ export default function AppUI() {
       let duracionTotal = 0;
       const fps = 30;
 
+      // Variables adaptativas según el formato
+      const isVert = videoFormat === 'vertical';
+      const targetW = isVert ? 1080 : 1920;
+      const targetH = isVert ? 1920 : 1080;
+      const zoomW = isVert ? 1200 : 2133;
+      const zoomH = isVert ? 2133 : 1200;
+
       // 3. CONSTRUIR FILTROS DE MOVIMIENTO
       for (let i = 0; i < videoFiles.length; i++) {
         const clipDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
@@ -284,18 +297,18 @@ export default function AppUI() {
 
         let cameraFX = "";
         if (clipEfecto === 'zoom_in_3d' || clipEfecto === 'zoom_out_3d') { 
-          cameraFX = `scale=1200:2133,rotate='0.02*sin(t)':ow=1200:oh=2133:c=black,zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
+          cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
         } else if (clipEfecto === 'pan_right') {
-          cameraFX = `scale=1200:2133,zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
+          cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
         } else { 
-          cameraFX = `scale=1200:2133,zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
+          cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
         }
 
         if (!directorPlan) {
           const mod = i % 3;
-          if (mod === 0) cameraFX = `scale=1200:2133,rotate='0.02*sin(t)':ow=1200:oh=2133:c=black,zoompan=z='min(zoom+0.002,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
-          if (mod === 1) cameraFX = `scale=1200:2133,zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
-          if (mod === 2) cameraFX = `scale=1200:2133,zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30`;
+          if (mod === 0) cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(zoom+0.002,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
+          if (mod === 1) cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)+in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
+          if (mod === 2) cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=${frames}:x='iw/2-(iw/zoom/2)-in*2':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
         }
 
         filterComplex += `[${i}:v]${cameraFX}[v${i}];`;
@@ -472,6 +485,22 @@ export default function AppUI() {
               </div>
             )}
 
+            {/* 🔥 CONTROLES DE FORMATO RESTAURADOS 🔥 */}
+            <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4">
+              <button
+                onClick={() => setVideoFormat('horizontal')}
+                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
+              >
+                🖥️ Horizontal (16:9)
+              </button>
+              <button
+                onClick={() => setVideoFormat('vertical')}
+                className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}
+              >
+                📱 Vertical (9:16)
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 bg-gray-950 p-4 rounded-xl border border-gray-800">
               <div>
                 <label className="text-xs text-gray-400 font-bold block mb-2">Tamaño del Texto ({fontSize}px)</label>
@@ -518,8 +547,8 @@ export default function AppUI() {
             {videoResult && (
               <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-2xl shadow-red-500/20">
                 <h3 className="text-sm font-bold text-green-400 mb-3">✅ Video Generado</h3>
-                <video src={videoResult} controls className="w-full rounded-lg bg-black aspect-[9/16]" />
-                <a href={videoResult} download="Tupia_Director_Video.mp4" className="mt-4 w-full block text-center bg-green-600 py-3 rounded-xl font-bold hover:bg-green-500 transition-colors">💾 Descargar MP4</a>
+                <video src={videoResult} controls className={`w-full rounded-lg bg-black ${videoFormat === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]'}`} />
+                <a href={videoResult} download={`Tupia_Director_${videoFormat}.mp4`} className="mt-4 w-full block text-center bg-green-600 py-3 rounded-xl font-bold hover:bg-green-500 transition-colors">💾 Descargar MP4</a>
               </div>
             )}
             <div className="bg-black border border-gray-800 p-4 rounded-xl font-mono text-xs text-red-400 h-40 overflow-y-auto whitespace-pre-wrap">{ffmpegLog}</div>
