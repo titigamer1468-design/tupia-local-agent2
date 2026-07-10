@@ -22,19 +22,30 @@ const PERSONAS = {
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles y copy persuasivo."
 };
 
-// 🔥 NORMALIZADOR UNIVERSAL DE IMÁGENES 🔥
+// 🔥 NORMALIZADOR UNIVERSAL MEJORADO (Límite de tamaño para celulares) 🔥
 const normalizeImageToJPG = (file) => {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      
+      // Tope de seguridad: Redimensiona fotos gigantes (como esa de 13000px) para no crashear la memoria
+      const MAX_SIZE = 2500;
+      if (width > MAX_SIZE || height > MAX_SIZE) {
+        const ratio = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
       canvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
         resolve(blob);
@@ -190,7 +201,7 @@ export default function AppUI() {
     setFfmpegLog(`[INFO] Cargados ${files.length} archivos multimedia al estudio.`);
   };
 
-  // 🚀 MOTOR FFMPEG ABSOLUTO: WORKER LOCAL + MATEMÁTICA DE TIEMPO 🚀
+  // 🚀 MOTOR FFMPEG ABSOLUTO: KEN BURNS CINEMATOGRÁFICO DE 5 SEGUNDOS 🚀
   const runFfmpegRender = async () => {
     if (videoFiles.length === 0) {
       alert("Sube algunas imágenes al Estudio primero para poder procesar.");
@@ -230,37 +241,60 @@ export default function AppUI() {
         await ffmpeg.writeFile(`img${i}.jpg`, fileData);
       }
 
-      // 🔥 MATEMÁTICA DE TIEMPO EXACTA 🔥
-      const segundosPorFoto = 3;
+      // 🔥 ARTE MATEMÁTICA: 5 Segundos de Zoom Suave (150 frames a 30fps) 🔥
+      const segundosPorFoto = 5;
+      const fps = 30;
+      const frames = segundosPorFoto * fps;
       const duracionTotal = videoFiles.length * segundosPorFoto;
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Procesando slideshow de ${duracionTotal} segundos...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Aplicando Ken Burns Cinematográfico (${duracionTotal}s en total)...`);
 
-      const codigoRetorno = await ffmpeg.exec([
-        '-framerate', `1/${segundosPorFoto}`, // Fija la duración de cada foto a 3 segundos
-        '-loop', '1',                         // Obliga a que la secuencia se repita sin morir al instante
-        '-t', `${duracionTotal}`,             // Corta el video exactamente cuando termine el lote
-        '-start_number', '0',                 // Asegura que empiece a leer desde la foto img0.jpg
-        '-i', 'img%d.jpg',   
-        '-c:v', 'libx264',   
-        '-r', '30',          
+      let ffmpegArgs = [];
+      let filterComplex = "";
+      
+      // Construimos el filtro dinámico para cada foto
+      for (let i = 0; i < videoFiles.length; i++) {
+        ffmpegArgs.push('-i', `img${i}.jpg`);
+        // Escala para llenar Vertical (1080x1920) y luego aplica un zoompan elegante y continuo por 5 segundos
+        filterComplex += `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.2)':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=${fps}[v${i}];`;
+      }
+
+      // Concatenamos si hay más de 1 foto
+      let concatInputs = "";
+      for (let i = 0; i < videoFiles.length; i++) {
+        concatInputs += `[v${i}]`;
+      }
+      
+      if (videoFiles.length > 1) {
+          filterComplex += `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`;
+          ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[outv]');
+      } else {
+          // Si es una sola foto, quitamos el punto y coma final
+          filterComplex = filterComplex.slice(0, -1);
+          ffmpegArgs.push('-filter_complex', filterComplex, '-map', '[v0]');
+      }
+
+      // Empaquetamos la exportación
+      ffmpegArgs.push(
+        '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
-        '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
-        'output.mp4'         
-      ]);
+        'output.mp4'
+      );
+
+      const codigoRetorno = await ffmpeg.exec(ffmpegArgs);
 
       if (codigoRetorno !== 0) {
         throw new Error("FFmpeg chocó durante la conversión (Código " + codigoRetorno + "). Revisa los logs arriba.");
       }
 
-      setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4...`);
+      setFfmpegLog(prev => `${prev}\n[INFO] Video procesado, generando MP4 final...`);
 
       const data = await ffmpeg.readFile('output.mp4');
       const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
       const videoUrl = URL.createObjectURL(videoBlob);
 
       setVideoResult(videoUrl);
-      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado perfectamente (${duracionTotal}s).`);
+      setFfmpegLog(prev => `${prev}\n✅ ¡ÉXITO ABSOLUTO! Video exportado hermosamente (${duracionTotal}s).`);
 
     } catch (error) {
       console.error(error);
