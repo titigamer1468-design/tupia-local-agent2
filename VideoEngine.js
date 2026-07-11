@@ -81,10 +81,14 @@ export async function renderVideo({
 }) {
   onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Con Transiciones y Físicas)...");
 
+  // 1. Crear la instancia si no existe
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
     ffmpegInstance.on('log', ({ message }) => onLog(`[FFMPEG] ${message}`));
-    
+  }
+  
+  // 2. Cargar los núcleos SÓLO si no están cargados ya (Blindaje Anti-Crash)
+  if (!ffmpegInstance.loaded) {
     // 🕵️‍♀️ DETECTOR INTELIGENTE DE ENTORNO (APK vs WEB)
     const isAPK = window.location.protocol === 'file:' || 
                   window.location.protocol.includes('app') || 
@@ -95,16 +99,20 @@ export async function renderVideo({
     
     if (isAPK) {
       onLog("[INFO] 📱 Modo APK Detectado: Cargando motor Offline...");
-      baseURL = '.'; // <-- AQUÍ ESTÁ EL ARREGLO DE RUTA RELATIVA
+      baseURL = '.'; // Ruta local dentro del APK
     } else {
       onLog("[INFO] 🌐 Modo Web Detectado: Conectando núcleos remotos...");
       baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'; 
     }
 
-    await ffmpegInstance.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
-    });
+    try {
+      await ffmpegInstance.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
+      });
+    } catch (e) {
+      throw new Error(`Fallo al cargar el motor. Asegúrate de que los archivos offline sean correctos. Detalle: ${e.message}`);
+    }
   }
   
   const ffmpeg = ffmpegInstance;
@@ -177,17 +185,13 @@ export async function renderVideo({
     } else if (efectoAplicar === 'pan_left') { 
       cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)-in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'wind_float') {
-      // 🍃 FÍSICA DE VIENTO: Seno y Coseno crean un suave patrón en forma de 8
       cameraFX = `scale=${zoomW}:${zoomH},rotate='0.015*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+20*sin(in/15)':y='ih/2-(ih/zoom/2)+10*cos(in/10)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'wave_float') {
-      // 🌊 FÍSICA DE OLA: Movimiento ondulatorio amplio con un ligero zoom progresivo
       cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t*1.5)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(1.05+in*0.001,1.2)':d=1:x='iw/2-(iw/zoom/2)+25*sin(in/20)':y='ih/2-(ih/zoom/2)+25*cos(in/15)':s=${targetW}x${targetH}:fps=${fps}`;
     } else {
-      // Fallback de seguridad
       cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     }
 
-    // Obligamos a FFmpeg a tener el mismo formato exacto para que el Crossfade no explote
     filterComplex += `[${i}:v]${cameraFX},setsar=1/1,format=yuv420p[v${i}];`;
   }
 
@@ -198,12 +202,11 @@ export async function renderVideo({
       
       for (let i = 1; i < videoFiles.length; i++) {
           let prevBaseDur = directorPlan && directorPlan[i-1] ? directorPlan[i-1].duracion : 5;
-          currentOffset += prevBaseDur; // Empalme milimétrico basado en la duración pura
+          currentOffset += prevBaseDur; 
           
           const isLast = (i === videoFiles.length - 1);
           const nextNode = isLast ? "[outv]" : `[xf${i}]`;
           
-          // xfade toma los dos clips y los funde
           filterComplex += `${lastNode}[v${i}]xfade=transition=fade:duration=${fadeDur}:offset=${currentOffset}${nextNode}`;
           if (!isLast) filterComplex += ';';
           
@@ -224,7 +227,7 @@ export async function renderVideo({
   ffmpegArgs.push(
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
-    '-t', `${duracionTotal}`, // Tiempo final exacto (62s garantizado)
+    '-t', `${duracionTotal}`, 
     'output.mp4'
   );
 
