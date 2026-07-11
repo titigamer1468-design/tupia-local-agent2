@@ -68,7 +68,7 @@ export const createFrame = (file, textOverlay, fontSize, textColor, format) => {
 };
 
 /**
- * 🎥 Controlador Principal FFmpeg con TRANSICIONES XFADE
+ * 🎥 Controlador Principal FFmpeg con TRANSICIONES XFADE Y EFECTOS NATURALES
  */
 export async function renderVideo({ 
   videoFiles, 
@@ -79,14 +79,28 @@ export async function renderVideo({
   videoFormat, 
   onLog 
 }) {
-  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Con Transiciones)...");
+  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Con Transiciones y Físicas)...");
 
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
     ffmpegInstance.on('log', ({ message }) => onLog(`[FFMPEG] ${message}`));
     
-    onLog("[INFO] 🌐 Conectando núcleos remotos...");
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    // 🕵️‍♀️ DETECTOR INTELIGENTE DE ENTORNO (APK vs WEB)
+    const isAPK = window.location.protocol === 'file:' || 
+                  window.location.protocol.includes('app') || 
+                  window.location.hostname === 'localhost' ||
+                  window.matchMedia('(display-mode: standalone)').matches;
+
+    let baseURL = '';
+    
+    if (isAPK) {
+      onLog("[INFO] 📱 Modo APK Detectado: Cargando motor Offline...");
+      baseURL = window.location.origin; 
+    } else {
+      onLog("[INFO] 🌐 Modo Web Detectado: Conectando núcleos remotos...");
+      baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'; 
+    }
+
     await ffmpegInstance.load({
       coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
       wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
@@ -136,7 +150,7 @@ export async function renderVideo({
     ffmpegArgs.push('-i', 'audio.mp3');
   }
 
-  onLog("[INFO] 🎥 Procesando Cámaras 3D y Transiciones (Crossfade)...");
+  onLog("[INFO] 🎥 Procesando Cámaras 3D, Físicas de Viento y Transiciones...");
   
   let filterComplex = "";
   
@@ -146,10 +160,12 @@ export async function renderVideo({
   const zoomW = isVert ? 1200 : 2133;
   const zoomH = isVert ? 2133 : 1200;
 
-  // 2. APLICAR ZOOM 3D A CADA CLIP INDIVIDUALMENTE
+  // 2. APLICAR ZOOM 3D Y FÍSICAS A CADA CLIP
   for (let i = 0; i < videoFiles.length; i++) {
     const clipEfecto = directorPlan && directorPlan[i] ? directorPlan[i].efecto_camara : null;
-    const efectoAplicar = clipEfecto || ['zoom_in_3d', 'pan_right', 'zoom_out_3d', 'pan_left'][i % 4];
+    
+    // Agregamos los nuevos efectos al ciclo aleatorio por si la IA no define uno
+    const efectoAplicar = clipEfecto || ['zoom_in_3d', 'wind_float', 'pan_right', 'wave_float', 'zoom_out_3d', 'pan_left'][i % 6];
 
     let cameraFX = "";
     if (efectoAplicar === 'zoom_in_3d') { 
@@ -158,8 +174,17 @@ export async function renderVideo({
       cameraFX = `scale=${zoomW}:${zoomH},rotate='-0.02*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='max(1.2-in*0.0015,1.0)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'pan_right') {
       cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
-    } else { 
+    } else if (efectoAplicar === 'pan_left') { 
       cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)-in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
+    } else if (efectoAplicar === 'wind_float') {
+      // 🍃 FÍSICA DE VIENTO: Seno y Coseno crean un suave patrón en forma de 8, simulando una cámara flotando en el aire.
+      cameraFX = `scale=${zoomW}:${zoomH},rotate='0.015*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+20*sin(in/15)':y='ih/2-(ih/zoom/2)+10*cos(in/10)':s=${targetW}x${targetH}:fps=${fps}`;
+    } else if (efectoAplicar === 'wave_float') {
+      // 🌊 FÍSICA DE OLA: Movimiento ondulatorio más amplio con un ligero zoom progresivo, como agua moviéndose.
+      cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t*1.5)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(1.05+in*0.001,1.2)':d=1:x='iw/2-(iw/zoom/2)+25*sin(in/20)':y='ih/2-(ih/zoom/2)+25*cos(in/15)':s=${targetW}x${targetH}:fps=${fps}`;
+    } else {
+      // Fallback de seguridad
+      cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     }
 
     // Obligamos a FFmpeg a tener el mismo formato exacto para que el Crossfade no explote
