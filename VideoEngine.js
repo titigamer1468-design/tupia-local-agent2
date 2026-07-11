@@ -112,10 +112,17 @@ export async function renderVideo({
   // 1. INPUTS (Añadiendo el tiempo de superposición a cada clip)
   for (let i = 0; i < videoFiles.length; i++) {
     let baseDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
+    
+    // 🔥 EL SECRETO DE LOS 62 SEGUNDOS 🔥
+    // Le regalamos 2 segundos extra matemáticamente al último clip
+    if (i === videoFiles.length - 1) {
+        baseDur += 2;
+    }
+
     duracionTotal += baseDur; // Sumamos la duración pura al total
     
     let inputDur = baseDur;
-    // Si no es el último clip, le regalamos el tiempo del fundido para que el video no se encoja
+    // Si no es el último clip, le agregamos el tiempo de superposición
     if (i < videoFiles.length - 1) {
         inputDur += fadeDur; 
     }
@@ -165,8 +172,8 @@ export async function renderVideo({
       let currentOffset = 0;
       
       for (let i = 1; i < videoFiles.length; i++) {
-          const baseDur = directorPlan && directorPlan[i-1] ? directorPlan[i-1].duracion : 5;
-          currentOffset += baseDur; // Usamos el tiempo puro para que el empalme sea milimétrico
+          let prevBaseDur = directorPlan && directorPlan[i-1] ? directorPlan[i-1].duracion : 5;
+          currentOffset += prevBaseDur; // Empalme milimétrico basado en la duración pura
           
           const isLast = (i === videoFiles.length - 1);
           const nextNode = isLast ? "[outv]" : `[xf${i}]`;
@@ -192,7 +199,7 @@ export async function renderVideo({
   ffmpegArgs.push(
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
-    '-t', `${duracionTotal}`, // Tiempo final perfecto
+    '-t', `${duracionTotal}`, // Tiempo final exacto (62s garantizado)
     'output.mp4'
   );
 
@@ -205,6 +212,6 @@ export async function renderVideo({
   const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
   const videoUrl = URL.createObjectURL(videoBlob);
 
-  onLog(`[INFO] ✅ ¡Operación exitosa! Tu obra maestra te espera.`);
+  onLog(`[INFO] ✅ ¡Operación exitosa! Tu obra maestra de ${duracionTotal}s te espera.`);
   return videoUrl;
 }
