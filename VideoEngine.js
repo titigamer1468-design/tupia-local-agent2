@@ -68,7 +68,7 @@ export const createFrame = (file, textOverlay, fontSize, textColor, format) => {
 };
 
 /**
- * 🎥 Controlador Principal FFmpeg con TRANSICIONES XFADE Y EFECTOS NATURALES
+ * 🎥 Controlador Principal FFmpeg
  */
 export async function renderVideo({ 
   videoFiles, 
@@ -79,7 +79,7 @@ export async function renderVideo({
   videoFormat, 
   onLog 
 }) {
-  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Con Transiciones y Físicas)...");
+  onLog("[INFO] ⚡ Inicializando Tupia Video Engine 3D (Bypass Cloudflare)...");
 
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
@@ -87,7 +87,6 @@ export async function renderVideo({
   }
   
   if (!ffmpegInstance.loaded) {
-    // 🕵️‍♀️ DETECTOR INTELIGENTE DE ENTORNO (APK vs WEB)
     const isAPK = window.location.protocol === 'file:' || 
                   window.location.protocol.includes('app') || 
                   window.location.hostname === 'localhost' ||
@@ -95,12 +94,39 @@ export async function renderVideo({
 
     try {
       if (isAPK) {
-        onLog("[INFO] 📱 Modo APK: Cargando motor Offline Directo (Sin Blob)...");
-        // 🔥 Android bloquea toBlobURL localmente. Usamos rutas directas al archivo.
+        onLog("[INFO] 📱 Ensamblando motor gigante en memoria RAM...");
+        
+        // 1. Descargamos el JS y las dos mitades del WASM de forma segura (con ./)
+        const [resJs, resA, resB] = await Promise.all([
+          fetch('./ffmpeg-core.js'),
+          fetch('./ffmpeg-core.wasm.partaa'),
+          fetch('./ffmpeg-core.wasm.partab')
+        ]);
+        
+        if (!resJs.ok || !resA.ok || !resB.ok) throw new Error("No se encontraron los archivos del motor en public/");
+        
+        // 2. Convertimos el JS a Memoria RAM (Evita el error de Module Specifier)
+        const jsBuffer = await resJs.arrayBuffer();
+        const jsBlob = new Blob([jsBuffer], { type: 'text/javascript' });
+        const localJsUrl = URL.createObjectURL(jsBlob);
+
+        // 3. Procesamos y soldamos el WASM en RAM
+        const bufA = await resA.arrayBuffer();
+        const bufB = await resB.arrayBuffer();
+        
+        const combined = new Uint8Array(bufA.byteLength + bufB.byteLength);
+        combined.set(new Uint8Array(bufA), 0);
+        combined.set(new Uint8Array(bufB), bufA.byteLength);
+        
+        const wasmBlob = new Blob([combined], { type: 'application/wasm' });
+        const localWasmUrl = URL.createObjectURL(wasmBlob);
+
+        // 4. Encendemos el motor usando las URL virtuales en memoria
         await ffmpegInstance.load({
-          coreURL: 'ffmpeg-core.js',
-          wasmURL: 'ffmpeg-core.wasm'
+          coreURL: localJsUrl,
+          wasmURL: localWasmUrl
         });
+
       } else {
         onLog("[INFO] 🌐 Modo Web: Conectando núcleos remotos...");
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'; 
@@ -110,9 +136,8 @@ export async function renderVideo({
         });
       }
     } catch (e) {
-      // Evitamos el error "undefined" extrayendo el mensaje real
-      const msg = e?.message || e || "Archivo corrupto o bloqueado por el celular";
-      throw new Error(`Fallo crítico cargando FFmpeg. Detalle: ${msg}`);
+      const msg = e?.message || e || "Error de red";
+      throw new Error(`Fallo soldando el motor. Detalle: ${msg}`);
     }
   }
   
@@ -132,7 +157,7 @@ export async function renderVideo({
 
   for (let i = 0; i < videoFiles.length; i++) {
     let baseDur = directorPlan && directorPlan[i] ? directorPlan[i].duracion : 5;
-    if (i === videoFiles.length - 1) baseDur += 2; // Alargue final 62s
+    if (i === videoFiles.length - 1) baseDur += 2; 
     duracionTotal += baseDur; 
     let inputDur = baseDur;
     if (i < videoFiles.length - 1) inputDur += fadeDur; 
