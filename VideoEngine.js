@@ -95,7 +95,7 @@ export async function renderVideo({
     
     if (isAPK) {
       onLog("[INFO] 📱 Modo APK Detectado: Cargando motor Offline...");
-      baseURL = window.location.origin; 
+      baseURL = '.'; // <-- AQUÍ ESTÁ EL ARREGLO DE RUTA RELATIVA
     } else {
       onLog("[INFO] 🌐 Modo Web Detectado: Conectando núcleos remotos...");
       baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'; 
@@ -177,10 +177,10 @@ export async function renderVideo({
     } else if (efectoAplicar === 'pan_left') { 
       cameraFX = `scale=${zoomW}:${zoomH},zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)-in*0.5':y='ih/2-(ih/zoom/2)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'wind_float') {
-      // 🍃 FÍSICA DE VIENTO: Seno y Coseno crean un suave patrón en forma de 8, simulando una cámara flotando en el aire.
+      // 🍃 FÍSICA DE VIENTO: Seno y Coseno crean un suave patrón en forma de 8
       cameraFX = `scale=${zoomW}:${zoomH},rotate='0.015*sin(t)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z=1.15:d=1:x='iw/2-(iw/zoom/2)+20*sin(in/15)':y='ih/2-(ih/zoom/2)+10*cos(in/10)':s=${targetW}x${targetH}:fps=${fps}`;
     } else if (efectoAplicar === 'wave_float') {
-      // 🌊 FÍSICA DE OLA: Movimiento ondulatorio más amplio con un ligero zoom progresivo, como agua moviéndose.
+      // 🌊 FÍSICA DE OLA: Movimiento ondulatorio amplio con un ligero zoom progresivo
       cameraFX = `scale=${zoomW}:${zoomH},rotate='0.02*sin(t*1.5)':ow=${zoomW}:oh=${zoomH}:c=black,zoompan=z='min(1.05+in*0.001,1.2)':d=1:x='iw/2-(iw/zoom/2)+25*sin(in/20)':y='ih/2-(ih/zoom/2)+25*cos(in/15)':s=${targetW}x${targetH}:fps=${fps}`;
     } else {
       // Fallback de seguridad
