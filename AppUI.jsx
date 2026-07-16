@@ -151,7 +151,7 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🏭 CREADOR DE IMÁGENES MASIVAS (CON JSZIP LOCAL)
+  // 🏭 CREADOR DE IMÁGENES MASIVAS (CONEXIÓN NUBE SEGURA)
   // ==========================================================
   const handleBatchImageGeneration = async () => {
     if (!keys.gemini) return alert("¡Necesitas tu API Key de Gemini/Google guardada en la Bóveda!");
@@ -168,14 +168,15 @@ export default function AppUI() {
     const erroresLote = [];
 
     try {
-      // 1️⃣ CARGA DINÁMICA DE JSZIP DESDE TU CARPETA PUBLIC (COMO FFMPEG)
+      // 1️⃣ CARGA DINÁMICA DE JSZIP DESDE LA NUBE OFICIAL
       if (!window.JSZip) {
-        setBatchStatus("Cargando Motor ZIP Local...");
+        setBatchStatus("Conectando Motor ZIP Seguro...");
         await new Promise((resolve, reject) => {
           const script = document.createElement('script');
-          script.src = './jszip.min.js'; // 🔥 BUSCA EN TU CARPETA LOCAL
+          // 🔥 URL SEGURA OFICIAL EN LUGAR DE ARCHIVO LOCAL 🔥
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
           script.onload = resolve;
-          script.onerror = () => reject(new Error("No se encontró jszip.min.js en la carpeta public. ¡Descárgalo en Termux!"));
+          script.onerror = () => reject(new Error("Tu navegador o AdBlocker bloqueó el Motor ZIP."));
           document.head.appendChild(script);
         });
       }
@@ -202,6 +203,7 @@ export default function AppUI() {
             ultimoError = err.message || "Error desconocido";
             const errLower = ultimoError.toLowerCase();
             
+            // Si es un error fatal de Google, no reintentar
             if (errLower.includes("censurado") || errLower.includes("api key") || errLower.match(/400|403|404/)) {
               break; 
             }
@@ -456,7 +458,6 @@ export default function AppUI() {
                   🚀 Generar Lote y Preparar ZIP
                 </button>
                 
-                {/* 🔴 CAJA DE ERROR: Ahora los errores NUNCA desaparecerán de tu vista */}
                 {batchStatus.includes('❌') && (
                   <div className="bg-red-900/30 p-4 rounded-xl border border-red-500/50 text-center animate-in fade-in zoom-in duration-300">
                     <p className="text-sm font-bold text-red-400">{batchStatus}</p>
