@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA } from './AIManager.js';
+import JSZip from "https://esm.sh/jszip";
+import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA, generarImagenGoogle } from './AIManager.js';
 import { renderVideo } from './VideoEngine.js';
 
 // Utilidad para empaquetar imágenes y enviarlas al servidor VPS
@@ -60,15 +61,19 @@ export default function AppUI() {
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
   const [videoFormat, setVideoFormat] = useState('vertical');
-  
-  // 🔥 ESTADO DE CONEXIÓN (Local vs VPS) 🔥
   const [engineMode, setEngineMode] = useState('local'); 
-
   const [isRendering, setIsRendering] = useState(false);
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D modular listo para generar.");
   const [videoResult, setVideoResult] = useState(null);
+
+  // 🔥 ESTADOS DE LA FÁBRICA DE IMÁGENES 🔥
+  const [batchInput, setBatchInput] = useState("");
+  const [isBatching, setIsBatching] = useState(false);
+  const [batchStatus, setBatchStatus] = useState("Esperando prompts...");
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [zipUrl, setZipUrl] = useState(null); // NUEVO ESTADO PARA EL ZIP MANUAL
   
-  // Añadimos vpsUrl a las llaves maestras
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', vpsUrl: 'http://localhost:5000' });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -88,8 +93,7 @@ export default function AppUI() {
     let parsedChats = savedChats ? JSON.parse(savedChats) : [];
     if (parsedChats.length > 0) {
       setChats(parsedChats);
-      const savedCurrentId = localStorage.getItem('tupia_current_chat');
-      setCurrentChatId(savedCurrentId && parsedChats.find(c => c.id === savedCurrentId) ? savedCurrentId : parsedChats[0].id);
+      setCurrentChatId(localStorage.getItem('tupia_current_chat') || parsedChats[0].id);
       addLog("[OK] Sistema iniciado.");
     } else { createNewChat(); }
   }, []);
@@ -148,6 +152,60 @@ export default function AppUI() {
   };
 
   // ==========================================================
+  // 🏭 CREADOR DE IMÁGENES MASIVAS (API IMAGEN 3)
+  // ==========================================================
+  const handleBatchImageGeneration = async () => {
+    if (!keys.gemini) return alert("¡Necesitas tu API Key de Gemini/Google guardada en la Bóveda!");
+    
+    const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
+    if (promptList.length === 0) return alert("Pega tus prompts primero.");
+
+    setIsBatching(true);
+    setBatchTotal(promptList.length);
+    setBatchProgress(0);
+    setBatchStatus("Iniciando conexión con Google AI Studio...");
+    setZipUrl(null); // Limpiamos el zip anterior si existiera
+
+    const zip = new JSZip();
+
+    try {
+      for (let i = 0; i < promptList.length; i++) {
+        const prompt = promptList[i];
+        const videoIndex = Math.floor(i / 12) + 1;
+        const imageIndex = (i % 12) + 1;
+
+        setBatchStatus(`Generando Video ${videoIndex} - Imagen ${imageIndex}...`);
+
+        const base64Data = await generarImagenGoogle(prompt, keys.gemini);
+
+        const folderName = `Video_${String(videoIndex).padStart(2, '0')}`;
+        const fileName = `${String(imageIndex).padStart(2, '0')}.png`;
+        
+        zip.folder(folderName).file(fileName, base64Data, { base64: true });
+        
+        setBatchProgress(i + 1);
+
+        if (i < promptList.length - 1) {
+          await new Promise(r => setTimeout(r, 2500));
+        }
+      }
+
+      setBatchStatus("Empaquetando archivo ZIP...");
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      
+      // 🔥 FIX PARA KIWI BROWSER: En lugar de forzar descarga fantasma, damos el link directo 🔥
+      const url = URL.createObjectURL(zipBlob);
+      setZipUrl(url);
+
+      setBatchStatus("¡Finalizado! Toca el botón verde de abajo para guardar el archivo.");
+    } catch (error) {
+      setBatchStatus(`❌ Error en la imagen ${batchProgress + 1}: ${error.message}`);
+    } finally {
+      setIsBatching(false);
+    }
+  };
+
+  // ==========================================================
   // 🚀 CONECTOR HÍBRIDO (LOCAL + VPS SERVIDOR)
   // ==========================================================
   const handleRenderProcess = async () => {
@@ -158,7 +216,6 @@ export default function AppUI() {
 
     try {
       if (engineMode === 'local') {
-        // 🔥 MODO CELULAR (Trabaja con el archivo VideoEngine.js local)
         const url = await renderVideo({
           videoFiles,
           audioFile,
@@ -171,7 +228,6 @@ export default function AppUI() {
         setVideoResult(url);
       } 
       else {
-        // 🔥 MODO SERVIDOR VPS (Conexión a tu API Node.js / n8n env)
         setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor...");
         
         const base64Videos = await Promise.all(videoFiles.map(f => fileToBase64(f.file)));
@@ -198,7 +254,7 @@ export default function AppUI() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || data.detalle || "Fallo en el Servidor VPS");
 
-        setVideoResult(data.downloadUrl); // El servidor devuelve el link directo al MP4
+        setVideoResult(data.downloadUrl);
         setFfmpegLog(`[INFO] ✅ ¡El Servidor completó el render en tiempo récord!`);
       }
     } catch (error) {
@@ -317,6 +373,50 @@ export default function AppUI() {
           </div>
         )}
 
+        {/* TAB FÁBRICA IMÁGENES (NUEVO) */}
+        {activeTab === 'factory' && (
+          <div className="p-6 space-y-6">
+            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400">📸 Fábrica de Imágenes</h2>
+            
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-800">
+              <label className="block text-sm font-bold text-gray-300 mb-2">Pega tus Prompts Aquí (Uno por línea)</label>
+              <textarea 
+                value={batchInput} 
+                onChange={(e) => setBatchInput(e.target.value)}
+                className="w-full bg-black border border-gray-700 rounded-lg p-3 text-sm text-green-400 font-mono h-64 focus:border-cyan-500 outline-none resize-none"
+                placeholder={`Ejemplo:\nUn café en París estilo cinematográfico...\nUn astronauta en marte, 4k...\nUna pirámide iluminada con neon...`}
+              />
+              <p className="text-xs text-gray-500 mt-2">💡 Tupia detectará el orden exacto. Cada 12 líneas agrupará las imágenes en una nueva carpeta (Video_01, Video_02, etc.)</p>
+            </div>
+
+            {isBatching ? (
+              <div className="bg-gray-950 p-4 rounded-xl border border-cyan-800/50 text-center">
+                <p className="text-sm font-bold text-cyan-400 mb-2">{batchStatus}</p>
+                <div className="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
+                  <div className="bg-cyan-500 h-4 transition-all duration-300" style={{ width: `${(batchProgress / batchTotal) * 100}%` }}></div>
+                </div>
+                <p className="text-xs text-gray-500">{batchProgress} de {batchTotal} imágenes listas</p>
+              </div>
+            ) : (
+              <button onClick={handleBatchImageGeneration} className="w-full font-bold py-4 rounded-xl shadow-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 transition-all">
+                🚀 Generar Lote y Preparar ZIP
+              </button>
+            )}
+
+            {/* 🔥 BOTÓN MANUAL DE DESCARGA ANTI-BLOQUEOS 🔥 */}
+            {zipUrl && (
+              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-green-500 shadow-2xl shadow-green-500/20 text-center animate-in fade-in zoom-in duration-300">
+                <h3 className="text-base font-bold text-green-400 mb-3">✅ ¡ZIP Generado con Éxito!</h3>
+                <p className="text-xs text-gray-400 mb-4">Toca el botón para guardar el archivo en tu dispositivo.</p>
+                <a href={zipUrl} download={`Documentales_Lote_${Date.now()}.zip`} className="w-full block text-center bg-green-600 py-4 rounded-xl font-bold hover:bg-green-500 transition-colors text-white shadow-lg shadow-green-600/30">
+                  📥 DESCARGAR ARCHIVO ZIP DIRECTO
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB ESTUDIO */}
         {activeTab === 'studio' && (
           <div className="p-6 space-y-6">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center justify-between text-red-400">
@@ -482,9 +582,9 @@ export default function AppUI() {
       {/* MENÚ INFERIOR */}
       <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
         <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
+        <button onClick={() => setActiveTab('factory')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='factory'?'text-cyan-500':'text-gray-500'}`}><span className="text-lg">📸</span><span className="text-[9px] font-bold">FÁBRICA</span></button>
         <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
         <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='settings'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">⚙️</span><span className="text-[9px] font-bold">BÓVEDA</span></button>
-        <button onClick={() => setActiveTab('logs')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='logs'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">📋</span><span className="text-[9px] font-bold">LOGS</span></button>
       </nav>
     </div>
   );

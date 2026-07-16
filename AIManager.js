@@ -33,7 +33,7 @@ El JSON debe tener esta estructura exacta para al menos 3 escenas (pueden ser m�
     "duracion": 5
   }
 ]
-Efectos de cámara permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_left". No generes voz, solo el texto visual y el movimiento.`,
+Efectos de cámara permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_left", "wind_float", "wave_float". No generes voz, solo el texto visual y el movimiento.`,
   youtube: "Eres Tupia MODO YOUTUBE. Eres un experto en retención de audiencia y el algoritmo de YouTube. Creas Títulos Virales, Miniaturas y Ganchos (Hooks) irresistibles para los primeros 15 segundos.",
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles, promesas de valor y copy persuasivo."
 };
@@ -175,4 +175,29 @@ export async function procesarConsultaIA({
   }
 
   return { uiReply, directorPlan };
+}
+
+// ---------------------------------------------------------
+// 🎨 NUEVO: MOTOR DE IMAGEN 3 (GOOGLE AI STUDIO)
+// ---------------------------------------------------------
+export async function generarImagenGoogle(prompt, apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-images:predict?key=${apiKey}`;
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      instances: [{ prompt: prompt }],
+      parameters: { 
+        sampleCount: 1, 
+        aspectRatio: "16:9" // Cambia a "9:16" si tus videos son formato vertical de TikTok
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(data.error.message);
+  
+  // Google devuelve la imagen en formato Base64 directamente
+  return data.predictions[0].bytesBase64Encoded;
 }
