@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import JSZip from "https://esm.sh/jszip";
 import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA, generarImagenGoogle } from './AIManager.js';
 import { renderVideo } from './VideoEngine.js';
 
@@ -163,13 +162,27 @@ export default function AppUI() {
     setIsBatching(true);
     setBatchTotal(promptList.length);
     setBatchProgress(0);
-    setBatchStatus("Iniciando conexión con Google AI Studio...");
+    setBatchStatus("Iniciando conexión...");
     setZipUrl(null);
     
     const erroresLote = [];
-    const zip = new JSZip();
 
     try {
+      // 1️⃣ CARGA DINÁMICA SEGURA DE JSZIP (Evita bloqueos de Cloudflare)
+      if (!window.JSZip) {
+        setBatchStatus("Descargando Motor ZIP...");
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Tu navegador bloqueó la descarga del Motor ZIP."));
+          document.head.appendChild(script);
+        });
+      }
+
+      const zip = new window.JSZip();
+
+      // 2️⃣ BUCLE DE GENERACIÓN DE IMÁGENES
       for (let i = 0; i < promptList.length; i++) {
         const prompt = promptList[i];
         const videoIndex = Math.floor(i / 12) + 1;
@@ -181,28 +194,24 @@ export default function AppUI() {
         let intentos = 0;
         let ultimoError = "";
         
-        // 🔥 BUCLE DE REINTENTOS Y ANÁLISIS DE ERRORES 🔥
         while (intentos < 3) {
           try {
             base64Data = await generarImagenGoogle(prompt, keys.gemini);
-            break; // Éxito, salir del bucle de reintentos
+            break; 
           } catch (err) {
             ultimoError = err.message || "Error desconocido";
             const errLower = ultimoError.toLowerCase();
             
-            // 1. Errores irrecuperables (Censura o API Key mala)
             if (errLower.includes("censurado") || errLower.includes("api key") || errLower.includes("400")) {
-              break; // No reintentar, saltar inmediato
+              break; 
             }
 
-            // 2. Errores de Cuota (429) o Servidor (500, 503)
             if (errLower.includes("429") || errLower.includes("quota") || errLower.includes("exhausted") || errLower.includes("503") || errLower.includes("500")) {
               intentos++;
               if (intentos >= 3) break;
               setBatchStatus(`⏳ Límite 429 detectado. Pausa de 15s (Reintento ${intentos}/3)...`);
               await new Promise(r => setTimeout(r, 15000));
             } else {
-              // Otro tipo de error (ej. Timeout)
               intentos++;
               if (intentos >= 3) break;
               setBatchStatus(`🔄 Reintentando por error de red... (${intentos}/3)`);
@@ -211,15 +220,12 @@ export default function AppUI() {
           }
         }
 
-        // 🔥 EL GRAN FIX: CONTINUAR AUNQUE FALLE 🔥
-        // En vez de romper todo el lote, guardamos un TXT en el zip y pasamos a la siguiente imagen.
         if (!base64Data) {
           console.warn(`Omitiendo V${videoIndex}-Img${imageIndex}: ${ultimoError}`);
           erroresLote.push(`Video ${videoIndex} - Img ${imageIndex}: ${ultimoError}`);
           setBatchProgress(i + 1);
-          // Generar un .txt de error dentro del ZIP para no perder el rastro
           zip.folder(`Video_${String(videoIndex).padStart(2, '0')}`).file(`ERROR_${String(imageIndex).padStart(2, '0')}.txt`, `Fallo al generar imagen.\nPrompt: ${prompt}\nError: ${ultimoError}`);
-          continue; // Salta a la siguiente imagen sin romper el lote entero!
+          continue; 
         }
 
         const folderName = `Video_${String(videoIndex).padStart(2, '0')}`;
@@ -228,7 +234,6 @@ export default function AppUI() {
         
         setBatchProgress(i + 1);
 
-        // Descanso de seguridad entre peticiones exitosas (5s)
         if (i < promptList.length - 1) {
           await new Promise(r => setTimeout(r, 5000));
         }
@@ -247,7 +252,7 @@ export default function AppUI() {
       }
 
     } catch (error) {
-      setBatchStatus(`❌ Error crítico que detuvo la fábrica: ${error.message}`);
+      setBatchStatus(`❌ Error Crítico: ${error.message}`);
     } finally {
       setIsBatching(false);
     }
@@ -446,9 +451,24 @@ export default function AppUI() {
                 <p className="text-xs text-gray-500">{batchProgress} de {batchTotal} imágenes listas</p>
               </div>
             ) : (
-              <button onClick={handleBatchImageGeneration} className="w-full font-bold py-4 rounded-xl shadow-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 transition-all">
-                🚀 Generar Lote y Preparar ZIP
-              </button>
+              <div className="space-y-4">
+                <button onClick={handleBatchImageGeneration} className="w-full font-bold py-4 rounded-xl shadow-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 transition-all">
+                  🚀 Generar Lote y Preparar ZIP
+                </button>
+                
+                {/* 🔴 CAJA DE ERROR: Ahora los errores NUNCA desaparecerán de tu vista */}
+                {batchStatus.includes('❌') && (
+                  <div className="bg-red-900/30 p-4 rounded-xl border border-red-500/50 text-center animate-in fade-in zoom-in duration-300">
+                    <p className="text-sm font-bold text-red-400">{batchStatus}</p>
+                  </div>
+                )}
+                
+                {batchStatus.includes('✅') && !zipUrl && (
+                  <div className="bg-green-900/30 p-4 rounded-xl border border-green-500/50 text-center animate-in fade-in zoom-in duration-300">
+                    <p className="text-sm font-bold text-green-400">{batchStatus}</p>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* 🔥 BOTÓN MANUAL DE DESCARGA ANTI-BLOQUEOS 🔥 */}
