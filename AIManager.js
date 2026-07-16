@@ -39,13 +39,7 @@ Efectos de cámara permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_le
 };
 
 export async function procesarConsultaIA({
-  activeModel,
-  specificModel,
-  activePersona,
-  finalInput,
-  history,
-  images,
-  currentKey
+  activeModel, specificModel, activePersona, finalInput, history, images, currentKey
 }) {
   const systemInstruction = PERSONAS[activePersona] || PERSONAS.default;
   let botReply = "";
@@ -55,58 +49,33 @@ export async function procesarConsultaIA({
       role: m.role === 'user' ? 'user' : 'model', 
       parts: [{ text: m.content }] 
     }));
-    
     const currentParts = [{ text: finalInput }];
     images.forEach(img => {
-      currentParts.push({ 
-        inline_data: { mime_type: img.mime, data: img.data.split(',')[1] } 
-      });
+      currentParts.push({ inline_data: { mime_type: img.mime, data: img.data.split(',')[1] } });
     });
-    
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${specificModel}:generateContent?key=${currentKey}`, {
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        system_instruction: { parts: [{ text: systemInstruction }] }, 
-        contents: [...geminiHistory, { role: 'user', parts: currentParts }] 
-      })
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system_instruction: { parts: [{ text: systemInstruction }] }, contents: [...geminiHistory, { role: 'user', parts: currentParts }] })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
     botReply = data.candidates[0].content.parts[0].text;
   }
-  
   else if (activeModel === 'claude') {
     const claudeHistory = history.map(m => ({ role: m.role, content: m.content }));
     const currentContent = [{ type: 'text', text: finalInput }];
-    
     images.forEach(img => {
-      currentContent.push({ 
-        type: 'image', 
-        source: { type: 'base64', media_type: img.mime, data: img.data.split(',')[1] } 
-      });
+      currentContent.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data.split(',')[1] } });
     });
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', 
-      headers: { 
-        'Content-Type': 'application/json', 
-        'x-api-key': currentKey, 
-        'anthropic-version': '2023-06-01', 
-        'anthropic-dangerous-direct-browser-access': 'true' 
-      },
-      body: JSON.stringify({ 
-        model: specificModel, 
-        max_tokens: 4096, 
-        system: systemInstruction, 
-        messages: [...claudeHistory, { role: 'user', content: currentContent }] 
-      })
+      headers: { 'Content-Type': 'application/json', 'x-api-key': currentKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: specificModel, max_tokens: 4096, system: systemInstruction, messages: [...claudeHistory, { role: 'user', content: currentContent }] })
     });
     const data = await res.json();
     if (data.type === 'error') throw new Error(data.error.message);
     botReply = data.content[0].text;
   }
-  
   else {
     let endpoint = '';
     if (activeModel === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -119,19 +88,10 @@ export async function procesarConsultaIA({
       currentContent = [{ type: 'text', text: finalInput }];
       images.forEach(img => currentContent.push({ type: 'image_url', image_url: { url: img.data } }));
     }
-    
     const standardHistory = history.map(m => ({ role: m.role, content: m.content }));
-
     const res = await fetch(endpoint, {
-      method: 'POST', 
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${currentKey}` 
-      },
-      body: JSON.stringify({ 
-        model: specificModel, 
-        messages: [{ role: 'system', content: systemInstruction }, ...standardHistory, { role: 'user', content: currentContent }] 
-      })
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+      body: JSON.stringify({ model: specificModel, messages: [{ role: 'system', content: systemInstruction }, ...standardHistory, { role: 'user', content: currentContent }] })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
@@ -157,86 +117,42 @@ export async function procesarConsultaIA({
       uiReply = `⚠️ **Aviso del Director:**\nHubo un problema generando el formato matemático del video. Por favor, intenta de nuevo o cambia a OpenAI.\n\nRespuesta original:\n${botReply}`;
     }
   }
-
   return { uiReply, directorPlan };
 }
 
 // ---------------------------------------------------------
-// 🎨 MOTOR DE IMAGEN 3 (CON RADAR DINÁMICO)
+// 🎨 MOTOR IA GRATUITO ILIMITADO (FLUX VIA POLLINATIONS)
 // ---------------------------------------------------------
-export async function generarImagenGoogle(prompt, apiKey) {
-  let modelName = "";
-  let methodName = "predict";
+export async function generarImagenIA(prompt) {
+  // Dimensiones para documental (16:9). Si usas vertical para Tiktok pon width=1080&height=1920
+  const width = 1920;
+  const height = 1080;
+  const seed = Math.floor(Math.random() * 1000000); 
   
-  // 1. RADAR: Preguntamos a Google qué modelos existen para esta API Key
-  try {
-    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (listRes.ok) {
-      const data = await listRes.json();
-      // Buscamos cualquier modelo de imagen (imagen-3.0-generate-001, 002, etc)
-      const imagenModel = data.models?.find(m => m.name.includes("imagen"));
-      if (imagenModel) {
-        modelName = imagenModel.name; 
-        if (imagenModel.supportedGenerationMethods) {
-          methodName = imagenModel.supportedGenerationMethods[0];
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("Radar falló, usando versión base.");
-  }
-
-  // Si el radar no encuentra nada, forzamos el oficial estándar
-  if (!modelName) {
-    modelName = "models/imagen-3.0-generate-001";
-  }
-
-  // 2. CONSTRUIR URL EXACTA SEGÚN LO QUE RESPONDIÓ GOOGLE
-  const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:${methodName}?key=${apiKey}`;
+  // URL secreta sin API Key usando el modelo ultra-realista FLUX
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
   
-  // 3. ENVIAR LA PETICIÓN
   let response;
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        instances: [{ prompt: prompt }],
-        parameters: { sampleCount: 1, aspectRatio: "16:9" }
-      })
-    });
+    response = await fetch(url);
   } catch (e) {
-    throw new Error(`Fallo de red: ${e.message}`);
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (e) {
-    throw new Error(`Google devolvió una respuesta inválida (Status ${response.status})`);
+    throw new Error(`Error de conexión a la API abierta: ${e.message}`);
   }
 
   if (!response.ok) {
-    if (response.status === 404) {
-       throw new Error(`[404] TU API KEY NO TIENE ACCESO: Tu cuenta de Google AI Studio aún no tiene habilitado Imagen 3. Necesitas habilitarlo o usar una API Key con permisos.`);
-    }
-    const errorMsg = data?.error?.message || response.statusText;
-    throw new Error(`[${response.status}] ${errorMsg}`);
-  }
-  
-  if (data.error) throw new Error(data.error.message);
-  
-  let base64Image = null;
-  // Google a veces devuelve "predictions" y a veces "generatedImages", atajamos ambas
-  if (data.predictions && data.predictions.length > 0) {
-     base64Image = data.predictions[0].bytesBase64Encoded;
-  } else if (data.generatedImages && data.generatedImages.length > 0) {
-     base64Image = data.generatedImages[0].image.imageBytes; 
+    throw new Error(`[${response.status}] El servidor gratuito está procesando demasiadas peticiones. Reintentando...`);
   }
 
-  if (!base64Image) {
-    throw new Error("CENSURADO_POR_GOOGLE: El prompt activó los filtros de seguridad (Violencia, NSFW, Marcas, etc).");
-  }
-
-  return base64Image;
+  // Pollinations descarga la imagen cruda, la convertimos a Base64 puro para el ZIP
+  const blob = await response.blob();
+  
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64data = reader.result.split(',')[1];
+      resolve(base64data);
+    };
+    reader.onerror = () => reject(new Error("Fallo al codificar la imagen."));
+    reader.readAsDataURL(blob);
+  });
 }
