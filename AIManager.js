@@ -107,7 +107,30 @@ export async function procesarConsultaIA({ activeModel, specificModel, activePer
 }
 
 // ---------------------------------------------------------
-// 📸 MOTOR DE IMÁGENES (FLUX GRATIS - POLLINATIONS)
+// 🚀 PUENTE UNIVERSAL MODAL SERVERLESS (IMÁGENES Y VIDEOS)
+// ---------------------------------------------------------
+export async function conectarModalServerless(workflowJSON, webhookUrl) {
+  if (!webhookUrl) throw new Error("No hay URL de Webhook configurada en la Bóveda.");
+  
+  let response;
+  try {
+    response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workflow: workflowJSON }) 
+    });
+  } catch (e) {
+    throw new Error(`Fallo de conexión con Modal: ${e.message}`);
+  }
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Error ${response.status}: ${data.error || 'Fallo en la nube de Modal'}`);
+  
+  return data; 
+}
+
+// ---------------------------------------------------------
+// 📸 MOTOR DE RESPALDO (FLUX GRATIS - POLLINATIONS)
 // ---------------------------------------------------------
 export async function generarImagenIA(prompt) {
   const width = 1920; const height = 1080;
@@ -125,27 +148,4 @@ export async function generarImagenIA(prompt) {
     reader.onerror = () => reject(new Error("Fallo codificación base64."));
     reader.readAsDataURL(blob);
   });
-}
-
-// ---------------------------------------------------------
-// 🎥 MOTOR DE VIDEOS (MODAL / RUNPOD WEBHOOK)
-// ---------------------------------------------------------
-export async function generarVideoWebhook(prompt, webhookUrl) {
-  if (!webhookUrl) throw new Error("No hay URL de Webhook configurada en la Bóveda.");
-  
-  let response;
-  try {
-    response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflow: prompt }) // Enviamos la orden al servidor Serverless
-    });
-  } catch (e) {
-    throw new Error(`Fallo de conexión con tu Webhook: ${e.message}`);
-  }
-
-  const data = await response.json();
-  if (!response.ok) throw new Error(`Error ${response.status}: ${data.error || 'Fallo en la nube'}`);
-  
-  return data; // Retorna la respuesta de Modal (ej: {"status": "success", "video_url": "..."})
 }

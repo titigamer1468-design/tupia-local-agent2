@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA, generarImagenIA, generarVideoWebhook } from './AIManager.js';
+import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA, conectarModalServerless, generarImagenIA } from './AIManager.js';
 import { renderVideo } from './VideoEngine.js';
 
 const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -52,6 +52,7 @@ export default function AppUI() {
   const [specificModel, setSpecificModel] = useState('gpt-4o-mini'); 
   const [activePersona, setActivePersona] = useState('director');
   
+  // ESTADOS DEL ESTUDIO DE VIDEO
   const [videoFiles, setVideoFiles] = useState([]);
   const [audioFile, setAudioFile] = useState(null);
   const [directorPlan, setDirectorPlan] = useState(null); 
@@ -75,7 +76,7 @@ export default function AppUI() {
   const [keys, setKeys] = useState({ 
     gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', 
     vpsUrl: 'http://localhost:5000', 
-    videoWebhook: '' // 🔥 NUEVA LLAVE PARA MODAL/RUNPOD 🔥
+    videoWebhook: '' // 🔥 LLAVE PARA MODAL 🔥
   });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -155,24 +156,24 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🏭 ORQUESTADOR DE FÁBRICA (SWITCH IMAGEN/VIDEO)
+  // 🏭 ORQUESTADOR DE FÁBRICA (CONECTOR UNIVERSAL MODAL)
   // ==========================================================
   const handleBatchGeneration = async () => {
     const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
-    if (promptList.length === 0) return alert("Pega tus prompts primero.");
+    if (promptList.length === 0) return alert("Pega tus instrucciones primero.");
 
-    if (factoryMode === 'video' && !keys.videoWebhook) {
-      return alert("¡No has configurado tu Webhook de Video (Modal/RunPod) en la Bóveda!");
+    if (!keys.videoWebhook) {
+      return alert("¡No has configurado tu Webhook Universal (Modal) en la Bóveda!");
     }
 
     setIsBatching(true);
     setBatchTotal(promptList.length);
     setBatchProgress(0);
-    setBatchStatus(factoryMode === 'image' ? "Iniciando Motor FLUX..." : "Conectando al Webhook de Video...");
+    setBatchStatus(`Conectando con la Súper Fábrica Modal en modo [${factoryMode.toUpperCase()}]...`);
     setZipUrl(null);
     
     const erroresLote = [];
-    let reporteVideos = "=== REPORTE DE VIDEOS GENERADOS ===\n\n";
+    let reporteModal = `=== REPORTE DE TAREAS (${factoryMode.toUpperCase()}) ===\n\n`;
 
     try {
       if (!window.JSZip) {
@@ -190,10 +191,7 @@ export default function AppUI() {
 
       for (let i = 0; i < promptList.length; i++) {
         const prompt = promptList[i];
-        const videoIndex = Math.floor(i / 12) + 1;
-        const itemIndex = (i % 12) + 1;
-
-        setBatchStatus(`Procesando [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
+        setBatchStatus(`Procesando tarea [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
 
         let intentos = 0;
         let ultimoError = "";
@@ -201,19 +199,15 @@ export default function AppUI() {
         
         while (intentos < 3 && !exito) {
           try {
-            if (factoryMode === 'image') {
-              // 📸 MODO IMAGEN
-              const base64Data = await generarImagenIA(prompt);
-              const folderName = `Video_${String(videoIndex).padStart(2, '0')}`;
-              const fileName = `IMG_${String(itemIndex).padStart(2, '0')}.png`;
-              zip.folder(folderName).file(fileName, base64Data, { base64: true });
-              exito = true;
-            } else {
-              // 🎥 MODO VIDEO
-              const respuestaWebhook = await generarVideoWebhook(prompt, keys.videoWebhook);
-              reporteVideos += `Tarea ${i+1}:\nPrompt: ${prompt}\nRespuesta: ${JSON.stringify(respuestaWebhook)}\n\n`;
-              exito = true;
-            }
+            // 🔥 AMBOS MODOS APUNTAN A MODAL AHORA 🔥
+            // Parseamos el prompt si es un JSON, si es texto lo dejamos como texto.
+            let workflowParaModal = prompt;
+            try { workflowParaModal = JSON.parse(prompt); } catch (e) { /* Era solo texto, está bien */ }
+
+            const respuestaWebhook = await conectarModalServerless(workflowParaModal, keys.videoWebhook);
+            reporteModal += `Tarea ${i+1}:\nOrden: ${prompt.substring(0,60)}...\nRespuesta Modal: ${JSON.stringify(respuestaWebhook)}\n\n`;
+            exito = true;
+            
           } catch (err) {
             ultimoError = err.message || "Error desconocido";
             intentos++;
@@ -226,23 +220,21 @@ export default function AppUI() {
         if (!exito) {
           console.warn(`Fallo en item ${i+1}: ${ultimoError}`);
           erroresLote.push(`Item ${i+1}: ${ultimoError}`);
-          zip.folder("Errores").file(`ERROR_${i+1}.txt`, `Fallo al procesar.\nPrompt: ${prompt}\nError: ${ultimoError}`);
+          zip.folder("Errores").file(`ERROR_${i+1}.txt`, `Fallo al procesar.\nDatos: ${prompt}\nError: ${ultimoError}`);
         }
         
         setBatchProgress(i + 1);
 
-        // Descanso entre peticiones
+        // Descanso entre peticiones a Modal
         if (i < promptList.length - 1) {
-          await new Promise(r => setTimeout(r, factoryMode === 'image' ? 2000 : 5000));
+          await new Promise(r => setTimeout(r, 3000));
         }
       }
 
       setBatchStatus("Empaquetando resultados...");
       
-      // Si fue modo video, guardamos el reporte de texto en el ZIP
-      if (factoryMode === 'video') {
-        zip.file("Reporte_Webhooks.txt", reporteVideos);
-      }
+      // Guardamos el reporte de Modal en el ZIP siempre
+      zip.file("Reporte_Modal_Serverless.txt", reporteModal);
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(zipBlob);
@@ -251,7 +243,7 @@ export default function AppUI() {
       if (erroresLote.length > 0) {
         setBatchStatus(`⚠️ Finalizó con ${erroresLote.length} errores. Revisa los .txt en el ZIP.`);
       } else {
-        setBatchStatus("✅ ¡Lote 100% Finalizado con éxito! Toca el botón verde.");
+        setBatchStatus("✅ ¡Lote 100% Enviado a Modal con éxito! Toca el botón verde.");
       }
 
     } catch (error) {
@@ -261,7 +253,62 @@ export default function AppUI() {
     }
   };
 
-  const handleRenderProcess = async () => { /* Motor 3D sin cambios */ };
+  const handleRenderProcess = async () => {
+    if (videoFiles.length === 0) return alert("Sube imágenes al Estudio primero.");
+    setIsRendering(true);
+    setVideoResult(null);
+    setFfmpegLog("");
+
+    try {
+      if (engineMode === 'local') {
+        const url = await renderVideo({
+          videoFiles,
+          audioFile,
+          directorPlan,
+          fontSize,
+          textColor,
+          videoFormat,
+          onLog: (msg) => setFfmpegLog(prev => `${prev}\n${msg}`)
+        });
+        setVideoResult(url);
+      } 
+      else {
+        setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor...");
+        
+        const base64Videos = await Promise.all(videoFiles.map(f => fileToBase64(f.file)));
+        let audioBase64 = null;
+        if (audioFile) audioBase64 = await fileToBase64(audioFile);
+
+        const payload = {
+          batchId: `lote_tupia_${Date.now()}`,
+          videoFiles: base64Videos,
+          audioUrl: audioBase64, 
+          directorPlan,
+          fontSize,
+          textColor,
+          videoFormat
+        };
+
+        setFfmpegLog(`[INFO] 🚀 Transmitiendo datos a la fábrica remota (${keys.vpsUrl})...`);
+        const response = await fetch(`${keys.vpsUrl}/api/webhook/render-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || data.detalle || "Fallo en el Servidor VPS");
+
+        setVideoResult(data.downloadUrl);
+        setFfmpegLog(`[INFO] ✅ ¡El Servidor completó el render en tiempo récord!`);
+      }
+    } catch (error) {
+      console.error(error);
+      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
+    } finally {
+      setIsRendering(false);
+    }
+  };
 
   const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
 
@@ -288,10 +335,13 @@ export default function AppUI() {
 
     try {
       const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
+      
       const { uiReply, directorPlan: planExtraido } = await procesarConsultaIA({
         activeModel, specificModel, activePersona, finalInput, history, images, currentKey
       });
+
       if (planExtraido) setDirectorPlan(planExtraido);
+
       setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: uiReply }] } : chat));
     } catch (error) {
       setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
@@ -372,7 +422,7 @@ export default function AppUI() {
         {activeTab === 'factory' && (
           <div className="p-6 space-y-6">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400 flex items-center gap-2">
-              🏭 Fábrica Universal
+              🏭 Súper Fábrica Serverless
             </h2>
 
             {/* 🔥 EL SWITCH MAESTRO 🔥 */}
@@ -380,7 +430,7 @@ export default function AppUI() {
               <button 
                 onClick={() => setFactoryMode('image')} 
                 className={`flex-1 text-xs font-bold py-3 rounded-lg transition-colors ${factoryMode === 'image' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30' : 'text-gray-500 hover:text-white'}`}>
-                📸 Generar Imágenes
+                📸 Webhooks Imagen
               </button>
               <button 
                 onClick={() => setFactoryMode('video')} 
@@ -391,20 +441,16 @@ export default function AppUI() {
             
             <div className="bg-gray-900 p-4 rounded-xl border border-gray-800">
               <label className="block text-sm font-bold text-gray-300 mb-2">
-                Pega tus {factoryMode === 'image' ? 'Prompts (Uno por línea)' : 'Instrucciones/JSON para Webhook'} Aquí
+                Pega tus Instrucciones o JSON para Modal (Modo: {factoryMode === 'image' ? 'Imágenes' : 'Video'}) Aquí
               </label>
               <textarea 
                 value={batchInput} 
                 onChange={(e) => setBatchInput(e.target.value)}
                 className={`w-full bg-black border border-gray-700 rounded-lg p-3 text-sm font-mono h-64 outline-none resize-none focus:border-${factoryMode === 'image' ? 'cyan' : 'purple'}-500 ${factoryMode === 'image' ? 'text-cyan-400' : 'text-purple-400'}`}
-                placeholder={factoryMode === 'image' 
-                  ? "Ejemplo:\nUn astronauta en marte, 4k...\nUna pirámide iluminada con neon..." 
-                  : "Ejemplo:\nhttps://url-de-tu-foto-1.jpg\nhttps://url-de-tu-foto-2.jpg\n(O el JSON que Modal espere)"}
+                placeholder={"Ejemplo de JSON ComfyUI:\n{\n  \"3\": {\n    \"class_type\": \"KSampler\",\n    ...\n  }\n}"}
               />
               <p className="text-xs text-gray-500 mt-2">
-                {factoryMode === 'image' 
-                  ? "💡 Conectado a FLUX. No requiere API Key. Guarda fotos directas en ZIP."
-                  : "⚡ Conectado a tu Bóveda. Disparará un POST a la URL de Modal/RunPod y guardará las respuestas en un ZIP."}
+                ⚡ Todo el procesamiento se envía ahora a tu servidor fantasma de Modal configurado en la Bóveda.
               </p>
             </div>
 
@@ -419,7 +465,7 @@ export default function AppUI() {
             ) : (
               <div className="space-y-4">
                 <button onClick={handleBatchGeneration} className={`w-full font-bold py-4 rounded-xl shadow-lg transition-all text-white ${factoryMode === 'image' ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'}`}>
-                  🚀 Procesar Lote y Descargar ZIP
+                  🚀 Disparar Tareas a Modal
                 </button>
                 
                 {batchStatus.includes('❌') && (
@@ -438,22 +484,34 @@ export default function AppUI() {
 
             {zipUrl && (
               <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-green-500 shadow-2xl shadow-green-500/20 text-center animate-in fade-in zoom-in duration-300">
-                <h3 className="text-base font-bold text-green-400 mb-3">✅ ¡ZIP Generado con Éxito!</h3>
+                <h3 className="text-base font-bold text-green-400 mb-3">✅ ¡ZIP de Reportes Generado!</h3>
                 <p className="text-xs text-gray-400 mb-4">Toca el botón para guardar el archivo en tu dispositivo.</p>
                 <a href={zipUrl} download={`Resultados_${factoryMode.toUpperCase()}_Lote_${Date.now()}.zip`} className="w-full block text-center bg-green-600 py-4 rounded-xl font-bold hover:bg-green-500 transition-colors text-white shadow-lg shadow-green-600/30">
-                  📥 DESCARGAR ARCHIVO ZIP DIRECTO
+                  📥 DESCARGAR REPORTE MODAL
                 </a>
               </div>
             )}
           </div>
         )}
 
-        {/* TAB ESTUDIO */}
+        {/* TAB ESTUDIO (Restaurado 100%) */}
         {activeTab === 'studio' && (
           <div className="p-6 space-y-6">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center justify-between text-red-400">
               <span>🎬 Tupia Director</span>
+              <select value={engineMode} onChange={(e)=>setEngineMode(e.target.value)} className="bg-gray-900 text-xs text-white border border-gray-700 rounded-lg p-1">
+                <option value="local">⚙️ Procesar en Celular</option>
+                <option value="vps">🚀 Enviar al Servidor VPS</option>
+              </select>
             </h2>
+            
+            {directorPlan && (
+              <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
+                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} escenas.</span>
+                <p className="text-xs text-gray-400 mt-1">Textos de IA listos para estampar. Ajusta la fuente abajo.</p>
+              </div>
+            )}
+
             <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4">
               <button onClick={() => setVideoFormat('horizontal')} className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}>
                 🖥️ Horizontal (16:9)
@@ -462,6 +520,7 @@ export default function AppUI() {
                 📱 Vertical (9:16)
               </button>
             </div>
+
             <div className="grid grid-cols-2 gap-4 bg-gray-950 p-4 rounded-xl border border-gray-800">
               <div>
                 <label className="text-xs text-gray-400 font-bold block mb-2">Tamaño del Texto ({fontSize}px)</label>
@@ -472,7 +531,47 @@ export default function AppUI() {
                 <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="w-full h-8 rounded cursor-pointer border-none" />
               </div>
             </div>
-            {/* Espacio para los botones de subida (simplificados por espacio en el snippet, mantiene funcionalidad) */}
+
+            <div className="flex gap-4 w-full">
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-red-500/40" onClick={() => document.getElementById('studio-upload').click()}>
+                <span className="text-4xl mb-2">🎞️</span><span className="text-sm font-bold text-gray-300">Imágenes</span>
+                <input id="studio-upload" type="file" multiple className="hidden" accept="image/*" onChange={handleStudioMedia} />
+              </div>
+              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500/40" onClick={() => document.getElementById('audio-upload').click()}>
+                <span className="text-4xl mb-2">🎵</span><span className="text-sm font-bold text-gray-300">{audioFile ? "Pista Lista" : "Música Fondo"}</span>
+                <input id="audio-upload" type="file" className="hidden" accept="audio/*" onChange={(e) => setAudioFile(e.target.files[0])} />
+                {audioFile && (
+                  <button onClick={(e) => { e.stopPropagation(); setAudioFile(null); document.getElementById('audio-upload').value = ""; }} className="mt-2 text-[10px] bg-red-600/30 text-red-400 px-3 py-1 rounded-full hover:bg-red-600 hover:text-white">Quitar</button>
+                )}
+              </div>
+            </div>
+
+            {videoFiles.length > 0 && (
+              <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
+                <p className="text-xs font-bold text-gray-400 mb-2">Secuencia Visual ({videoFiles.length} clips):</p>
+                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                  {videoFiles.map(f => (
+                    <div key={f.id} className="bg-gray-900 p-2 rounded-lg text-xs flex justify-between border border-gray-800">
+                      <span className="truncate flex-1 text-gray-300">{f.name}</span>
+                      <button onClick={() => setVideoFiles(prev => prev.filter(item => item.id !== f.id))} className="text-red-500 ml-2">X</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button onClick={handleRenderProcess} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
+              {isRendering ? "⚙️ Renderizando Magia 3D..." : `🎬 Renderizar en ${engineMode.toUpperCase()}`}
+            </button>
+
+            {videoResult && (
+              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-2xl shadow-red-500/20">
+                <h3 className="text-sm font-bold text-green-400 mb-3">✅ Video Generado</h3>
+                <video src={videoResult} controls className={`w-full rounded-lg bg-black ${videoFormat === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]'}`} />
+                <a href={videoResult} download={`Tupia_Director_${videoFormat}.mp4`} className="mt-4 w-full block text-center bg-green-600 py-3 rounded-xl font-bold hover:bg-green-500 transition-colors">💾 Descargar MP4</a>
+              </div>
+            )}
+            <div className="bg-black border border-gray-800 p-4 rounded-xl font-mono text-xs text-red-400 h-40 overflow-y-auto whitespace-pre-wrap">{ffmpegLog}</div>
           </div>
         )}
 
@@ -482,9 +581,9 @@ export default function AppUI() {
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de Configuración</h2>
             
             <div className="bg-gray-900 p-3 rounded-xl border border-gray-800">
-              <label className="block text-sm font-bold text-green-400 mb-1">🔗 Webhook del Servidor de Video (Modal/RunPod)</label>
+              <label className="block text-sm font-bold text-green-400 mb-1">🔗 Webhook Universal Modal (Imágenes y Videos)</label>
               <input type="text" value={keys.videoWebhook} onChange={(e) => setKeys(prev => ({...prev, videoWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-green-500 text-sm" placeholder="Ej: https://cristina-modal-run..." />
-              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde la Pestaña "Fábrica (Video)" enviará las peticiones masivas.</p>
+              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde la "Fábrica" enviará las peticiones JSON de ComfyUI.</p>
             </div>
 
             {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
