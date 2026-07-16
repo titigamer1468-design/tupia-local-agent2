@@ -72,7 +72,7 @@ export default function AppUI() {
   const [batchStatus, setBatchStatus] = useState("Esperando prompts...");
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
-  const [zipUrl, setZipUrl] = useState(null); // NUEVO ESTADO PARA EL ZIP MANUAL
+  const [zipUrl, setZipUrl] = useState(null);
   
   const [keys, setKeys] = useState({ gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', vpsUrl: 'http://localhost:5000' });
 
@@ -164,7 +164,7 @@ export default function AppUI() {
     setBatchTotal(promptList.length);
     setBatchProgress(0);
     setBatchStatus("Iniciando conexión con Google AI Studio...");
-    setZipUrl(null); // Limpiamos el zip anterior si existiera
+    setZipUrl(null);
 
     const zip = new JSZip();
 
@@ -176,7 +176,27 @@ export default function AppUI() {
 
         setBatchStatus(`Generando Video ${videoIndex} - Imagen ${imageIndex}...`);
 
-        const base64Data = await generarImagenGoogle(prompt, keys.gemini);
+        let base64Data = null;
+        let intentos = 0;
+        
+        // 🔥 BUCLE DE REINTENTOS PARA EVADIR EL ERROR DE LÍMITE (429) 🔥
+        while (intentos < 3) {
+          try {
+            base64Data = await generarImagenGoogle(prompt, keys.gemini);
+            break; // Si tiene éxito, rompemos el bucle
+          } catch (err) {
+            // Verificamos si el error es de límite de cuota (429 Too Many Requests)
+            if (err.message.includes("429") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("exhausted")) {
+              intentos++;
+              setBatchStatus(`⏳ Límite de Google detectado. Respirando 15s (Reintento ${intentos}/3)...`);
+              await new Promise(r => setTimeout(r, 15000)); // Pausa larga de 15 segundos
+            } else {
+              throw err; // Si es un error de API Key u otra cosa, que falle normal
+            }
+          }
+        }
+
+        if (!base64Data) throw new Error("Google rechazó la conexión tras 3 reintentos por límite de cuota.");
 
         const folderName = `Video_${String(videoIndex).padStart(2, '0')}`;
         const fileName = `${String(imageIndex).padStart(2, '0')}.png`;
@@ -185,15 +205,15 @@ export default function AppUI() {
         
         setBatchProgress(i + 1);
 
+        // 🔥 DESCANSO MATEMÁTICO: 5 SEGUNDOS = 12 RPM (Google Free Tier permite max 15 RPM) 🔥
         if (i < promptList.length - 1) {
-          await new Promise(r => setTimeout(r, 2500));
+          await new Promise(r => setTimeout(r, 5000));
         }
       }
 
       setBatchStatus("Empaquetando archivo ZIP...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       
-      // 🔥 FIX PARA KIWI BROWSER: En lugar de forzar descarga fantasma, damos el link directo 🔥
       const url = URL.createObjectURL(zipBlob);
       setZipUrl(url);
 
