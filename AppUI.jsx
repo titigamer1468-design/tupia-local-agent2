@@ -152,7 +152,7 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🏭 CREADOR DE IMÁGENES MASIVAS (API IMAGEN 3)
+  // 🏭 CREADOR DE IMÁGENES MASIVAS (API IMAGEN 3 INDESTRUCTIBLE)
   // ==========================================================
   const handleBatchImageGeneration = async () => {
     if (!keys.gemini) return alert("¡Necesitas tu API Key de Gemini/Google guardada en la Bóveda!");
@@ -165,7 +165,8 @@ export default function AppUI() {
     setBatchProgress(0);
     setBatchStatus("Iniciando conexión con Google AI Studio...");
     setZipUrl(null);
-
+    
+    const erroresLote = [];
     const zip = new JSZip();
 
     try {
@@ -178,34 +179,56 @@ export default function AppUI() {
 
         let base64Data = null;
         let intentos = 0;
+        let ultimoError = "";
         
-        // 🔥 BUCLE DE REINTENTOS PARA EVADIR EL ERROR DE LÍMITE (429) 🔥
+        // 🔥 BUCLE DE REINTENTOS Y ANÁLISIS DE ERRORES 🔥
         while (intentos < 3) {
           try {
             base64Data = await generarImagenGoogle(prompt, keys.gemini);
-            break; // Si tiene éxito, rompemos el bucle
+            break; // Éxito, salir del bucle de reintentos
           } catch (err) {
-            // Verificamos si el error es de límite de cuota (429 Too Many Requests)
-            if (err.message.includes("429") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("exhausted")) {
+            ultimoError = err.message || "Error desconocido";
+            const errLower = ultimoError.toLowerCase();
+            
+            // 1. Errores irrecuperables (Censura o API Key mala)
+            if (errLower.includes("censurado") || errLower.includes("api key") || errLower.includes("400")) {
+              break; // No reintentar, saltar inmediato
+            }
+
+            // 2. Errores de Cuota (429) o Servidor (500, 503)
+            if (errLower.includes("429") || errLower.includes("quota") || errLower.includes("exhausted") || errLower.includes("503") || errLower.includes("500")) {
               intentos++;
-              setBatchStatus(`⏳ Límite de Google detectado. Respirando 15s (Reintento ${intentos}/3)...`);
-              await new Promise(r => setTimeout(r, 15000)); // Pausa larga de 15 segundos
+              if (intentos >= 3) break;
+              setBatchStatus(`⏳ Límite 429 detectado. Pausa de 15s (Reintento ${intentos}/3)...`);
+              await new Promise(r => setTimeout(r, 15000));
             } else {
-              throw err; // Si es un error de API Key u otra cosa, que falle normal
+              // Otro tipo de error (ej. Timeout)
+              intentos++;
+              if (intentos >= 3) break;
+              setBatchStatus(`🔄 Reintentando por error de red... (${intentos}/3)`);
+              await new Promise(r => setTimeout(r, 3000));
             }
           }
         }
 
-        if (!base64Data) throw new Error("Google rechazó la conexión tras 3 reintentos por límite de cuota.");
+        // 🔥 EL GRAN FIX: CONTINUAR AUNQUE FALLE 🔥
+        // En vez de romper todo el lote, guardamos un TXT en el zip y pasamos a la siguiente imagen.
+        if (!base64Data) {
+          console.warn(`Omitiendo V${videoIndex}-Img${imageIndex}: ${ultimoError}`);
+          erroresLote.push(`Video ${videoIndex} - Img ${imageIndex}: ${ultimoError}`);
+          setBatchProgress(i + 1);
+          // Generar un .txt de error dentro del ZIP para no perder el rastro
+          zip.folder(`Video_${String(videoIndex).padStart(2, '0')}`).file(`ERROR_${String(imageIndex).padStart(2, '0')}.txt`, `Fallo al generar imagen.\nPrompt: ${prompt}\nError: ${ultimoError}`);
+          continue; // Salta a la siguiente imagen sin romper el lote entero!
+        }
 
         const folderName = `Video_${String(videoIndex).padStart(2, '0')}`;
         const fileName = `${String(imageIndex).padStart(2, '0')}.png`;
-        
         zip.folder(folderName).file(fileName, base64Data, { base64: true });
         
         setBatchProgress(i + 1);
 
-        // 🔥 DESCANSO MATEMÁTICO: 5 SEGUNDOS = 12 RPM (Google Free Tier permite max 15 RPM) 🔥
+        // Descanso de seguridad entre peticiones exitosas (5s)
         if (i < promptList.length - 1) {
           await new Promise(r => setTimeout(r, 5000));
         }
@@ -217,9 +240,14 @@ export default function AppUI() {
       const url = URL.createObjectURL(zipBlob);
       setZipUrl(url);
 
-      setBatchStatus("¡Finalizado! Toca el botón verde de abajo para guardar el archivo.");
+      if (erroresLote.length > 0) {
+        setBatchStatus(`⚠️ Finalizó con ${erroresLote.length} errores (Revisa los .txt en el ZIP). ¡Toca descargar!`);
+      } else {
+        setBatchStatus("✅ ¡Lote 100% Finalizado con éxito! Toca el botón verde.");
+      }
+
     } catch (error) {
-      setBatchStatus(`❌ Error en la imagen ${batchProgress + 1}: ${error.message}`);
+      setBatchStatus(`❌ Error crítico que detuvo la fábrica: ${error.message}`);
     } finally {
       setIsBatching(false);
     }
