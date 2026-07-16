@@ -38,21 +38,14 @@ Efectos de cámara permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_le
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles, promesas de valor y copy persuasivo."
 };
 
-export async function procesarConsultaIA({
-  activeModel, specificModel, activePersona, finalInput, history, images, currentKey
-}) {
+export async function procesarConsultaIA({ activeModel, specificModel, activePersona, finalInput, history, images, currentKey }) {
   const systemInstruction = PERSONAS[activePersona] || PERSONAS.default;
   let botReply = "";
 
   if (activeModel === 'gemini') {
-    const geminiHistory = history.map(m => ({ 
-      role: m.role === 'user' ? 'user' : 'model', 
-      parts: [{ text: m.content }] 
-    }));
+    const geminiHistory = history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
     const currentParts = [{ text: finalInput }];
-    images.forEach(img => {
-      currentParts.push({ inline_data: { mime_type: img.mime, data: img.data.split(',')[1] } });
-    });
+    images.forEach(img => { currentParts.push({ inline_data: { mime_type: img.mime, data: img.data.split(',')[1] } }); });
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${specificModel}:generateContent?key=${currentKey}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ system_instruction: { parts: [{ text: systemInstruction }] }, contents: [...geminiHistory, { role: 'user', parts: currentParts }] })
@@ -60,23 +53,18 @@ export async function procesarConsultaIA({
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
     botReply = data.candidates[0].content.parts[0].text;
-  }
-  else if (activeModel === 'claude') {
+  } else if (activeModel === 'claude') {
     const claudeHistory = history.map(m => ({ role: m.role, content: m.content }));
     const currentContent = [{ type: 'text', text: finalInput }];
-    images.forEach(img => {
-      currentContent.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data.split(',')[1] } });
-    });
+    images.forEach(img => { currentContent.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data.split(',')[1] } }); });
     const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json', 'x-api-key': currentKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': currentKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({ model: specificModel, max_tokens: 4096, system: systemInstruction, messages: [...claudeHistory, { role: 'user', content: currentContent }] })
     });
     const data = await res.json();
     if (data.type === 'error') throw new Error(data.error.message);
     botReply = data.content[0].text;
-  }
-  else {
+  } else {
     let endpoint = '';
     if (activeModel === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
     else if (activeModel === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
@@ -109,9 +97,7 @@ export async function procesarConsultaIA({
         uiReply = `🎬 **¡El Guion y la Dirección están Listos!**\nHe configurado el Estudio de Video con ${directorPlan.length} escenas.\n\n` +
                    directorPlan.map(p => `📽️ **Escena ${p.id + 1} (${p.duracion}s)**\n*Texto en Pantalla:* ${p.texto_pantalla}\n*Movimiento de Cámara:* ${p.efecto_camara}`).join('\n\n') +
                    `\n\n👉 ¡Ve a la pestaña ESTUDIO, ajusta los colores de tu marca, sube tus fotos y dale a Compilar Superproducción!`;
-      } else {
-        throw new Error("No se detectó un JSON válido en la respuesta de la IA.");
-      }
+      } else { throw new Error("No se detectó un JSON válido en la respuesta de la IA."); }
     } catch (e) {
       console.error("Fallo parseando el Plan del Director:", e);
       uiReply = `⚠️ **Aviso del Director:**\nHubo un problema generando el formato matemático del video. Por favor, intenta de nuevo o cambia a OpenAI.\n\nRespuesta original:\n${botReply}`;
@@ -121,38 +107,45 @@ export async function procesarConsultaIA({
 }
 
 // ---------------------------------------------------------
-// 🎨 MOTOR IA GRATUITO ILIMITADO (FLUX VIA POLLINATIONS)
+// 📸 MOTOR DE IMÁGENES (FLUX GRATIS - POLLINATIONS)
 // ---------------------------------------------------------
 export async function generarImagenIA(prompt) {
-  // Dimensiones para documental (16:9). Si usas vertical para Tiktok pon width=1080&height=1920
-  const width = 1920;
-  const height = 1080;
+  const width = 1920; const height = 1080;
   const seed = Math.floor(Math.random() * 1000000); 
-  
-  // URL secreta sin API Key usando el modelo ultra-realista FLUX
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
   
   let response;
-  try {
-    response = await fetch(url);
-  } catch (e) {
-    throw new Error(`Error de conexión a la API abierta: ${e.message}`);
-  }
+  try { response = await fetch(url); } catch (e) { throw new Error(`Error de red: ${e.message}`); }
+  if (!response.ok) throw new Error(`[${response.status}] Servidor FLUX saturado.`);
 
-  if (!response.ok) {
-    throw new Error(`[${response.status}] El servidor gratuito está procesando demasiadas peticiones. Reintentando...`);
-  }
-
-  // Pollinations descarga la imagen cruda, la convertimos a Base64 puro para el ZIP
   const blob = await response.blob();
-  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const base64data = reader.result.split(',')[1];
-      resolve(base64data);
-    };
-    reader.onerror = () => reject(new Error("Fallo al codificar la imagen."));
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error("Fallo codificación base64."));
     reader.readAsDataURL(blob);
   });
+}
+
+// ---------------------------------------------------------
+// 🎥 MOTOR DE VIDEOS (MODAL / RUNPOD WEBHOOK)
+// ---------------------------------------------------------
+export async function generarVideoWebhook(prompt, webhookUrl) {
+  if (!webhookUrl) throw new Error("No hay URL de Webhook configurada en la Bóveda.");
+  
+  let response;
+  try {
+    response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workflow: prompt }) // Enviamos la orden al servidor Serverless
+    });
+  } catch (e) {
+    throw new Error(`Fallo de conexión con tu Webhook: ${e.message}`);
+  }
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Error ${response.status}: ${data.error || 'Fallo en la nube'}`);
+  
+  return data; // Retorna la respuesta de Modal (ej: {"status": "success", "video_url": "..."})
 }
