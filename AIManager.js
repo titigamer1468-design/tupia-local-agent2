@@ -54,6 +54,9 @@ export async function procesarConsultaIA({
   const systemInstruction = PERSONAS[activePersona] || PERSONAS.default;
   let botReply = "";
 
+  // ---------------------------------------------------------
+  // 🟢 MOTOR GEMINI (Soporta Base64 Nativo)
+  // ---------------------------------------------------------
   if (activeModel === 'gemini') {
     const geminiHistory = history.map(m => ({ 
       role: m.role === 'user' ? 'user' : 'model', 
@@ -80,6 +83,9 @@ export async function procesarConsultaIA({
     botReply = data.candidates[0].content.parts[0].text;
   }
   
+  // ---------------------------------------------------------
+  // 🟣 MOTOR CLAUDE (Soporta Base64 Nativo)
+  // ---------------------------------------------------------
   else if (activeModel === 'claude') {
     const claudeHistory = history.map(m => ({ role: m.role, content: m.content }));
     const currentContent = [{ type: 'text', text: finalInput }];
@@ -111,6 +117,9 @@ export async function procesarConsultaIA({
     botReply = data.content[0].text;
   }
   
+  // ---------------------------------------------------------
+  // 🔵 MOTOR OPENAI / DEEPSEEK / ALIBABA / NVIDIA (Estándar)
+  // ---------------------------------------------------------
   else {
     let endpoint = '';
     if (activeModel === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -172,8 +181,8 @@ export async function procesarConsultaIA({
 // 🎨 MOTOR DE IMAGEN 3 (GOOGLE AI STUDIO BLINDADO)
 // ---------------------------------------------------------
 export async function generarImagenGoogle(prompt, apiKey) {
-  // 🔥 FIX: NOMBRE EXACTO Y OFICIAL DEL MODELO EN LA API v1beta
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
+  // 🔥 FIX DEFINITIVO: Endpoint oficial de Imagen 3 (002) en AI Studio
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
   
   let response;
   try {
