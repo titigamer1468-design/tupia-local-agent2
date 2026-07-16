@@ -156,7 +156,8 @@ export default function AppUI() {
   const handleBatchImageGeneration = async () => {
     if (!keys.gemini) return alert("¡Necesitas tu API Key de Gemini/Google guardada en la Bóveda!");
     
-    const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
+    const promptList = batchInput.split('
+').filter(p => p.trim() !== '');
     if (promptList.length === 0) return alert("Pega tus prompts primero.");
 
     setIsBatching(true);
@@ -168,7 +169,6 @@ export default function AppUI() {
     const erroresLote = [];
 
     try {
-      // 1️⃣ CARGA DINÁMICA SEGURA DE JSZIP (Evita bloqueos de Cloudflare)
       if (!window.JSZip) {
         setBatchStatus("Descargando Motor ZIP...");
         await new Promise((resolve, reject) => {
@@ -182,7 +182,6 @@ export default function AppUI() {
 
       const zip = new window.JSZip();
 
-      // 2️⃣ BUCLE DE GENERACIÓN DE IMÁGENES
       for (let i = 0; i < promptList.length; i++) {
         const prompt = promptList[i];
         const videoIndex = Math.floor(i / 12) + 1;
@@ -202,19 +201,21 @@ export default function AppUI() {
             ultimoError = err.message || "Error desconocido";
             const errLower = ultimoError.toLowerCase();
             
-            if (errLower.includes("censurado") || errLower.includes("api key") || errLower.includes("400")) {
+            // Si es un error fatal de Google, no reintentar
+            if (errLower.includes("censurado") || errLower.includes("api key") || errLower.match(/400|403|404/)) {
               break; 
             }
 
-            if (errLower.includes("429") || errLower.includes("quota") || errLower.includes("exhausted") || errLower.includes("503") || errLower.includes("500")) {
+            if (errLower.includes("429") || errLower.includes("quota") || errLower.includes("exhausted") || errLower.match(/500|503/)) {
               intentos++;
               if (intentos >= 3) break;
-              setBatchStatus(`⏳ Límite 429 detectado. Pausa de 15s (Reintento ${intentos}/3)...`);
+              setBatchStatus(`⏳ Límite 429 detectado. Pausa de 15s (Intento ${intentos}/3)...`);
               await new Promise(r => setTimeout(r, 15000));
             } else {
               intentos++;
               if (intentos >= 3) break;
-              setBatchStatus(`🔄 Reintentando por error de red... (${intentos}/3)`);
+              // 🔥 AQUÍ ESTÁ EL CAMBIO: AHORA MOSTRAMOS EL ERROR REAL EN PANTALLA 🔥
+              setBatchStatus(`🔄 Reintentando (${intentos}/3) | ERROR: ${ultimoError}`);
               await new Promise(r => setTimeout(r, 3000));
             }
           }
@@ -222,9 +223,11 @@ export default function AppUI() {
 
         if (!base64Data) {
           console.warn(`Omitiendo V${videoIndex}-Img${imageIndex}: ${ultimoError}`);
-          erroresLote.push(`Video ${videoIndex} - Img ${imageIndex}: ${ultimoError}`);
+          erroresLote.push(`V${videoIndex}-Img${imageIndex}: ${ultimoError}`);
           setBatchProgress(i + 1);
-          zip.folder(`Video_${String(videoIndex).padStart(2, '0')}`).file(`ERROR_${String(imageIndex).padStart(2, '0')}.txt`, `Fallo al generar imagen.\nPrompt: ${prompt}\nError: ${ultimoError}`);
+          zip.folder(`Video_${String(videoIndex).padStart(2, '0')}`).file(`ERROR_${String(imageIndex).padStart(2, '0')}.txt`, `Fallo al generar imagen.
+Prompt: ${prompt}
+Error: ${ultimoError}`);
           continue; 
         }
 
@@ -246,7 +249,7 @@ export default function AppUI() {
       setZipUrl(url);
 
       if (erroresLote.length > 0) {
-        setBatchStatus(`⚠️ Finalizó con ${erroresLote.length} errores (Revisa los .txt en el ZIP). ¡Toca descargar!`);
+        setBatchStatus(`⚠️ Finalizó con ${erroresLote.length} errores. Revisa los .txt en el ZIP o tu conexión.`);
       } else {
         setBatchStatus("✅ ¡Lote 100% Finalizado con éxito! Toca el botón verde.");
       }
