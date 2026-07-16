@@ -38,10 +38,6 @@ Efectos de cámara permitidos: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_le
   infoproducto: "Eres Tupia MODO INFOPRODUCTO. Eres un experto en Marketing Digital y creación de Cursos Online. Diseñas ofertas irresistibles, promesas de valor y copy persuasivo."
 };
 
-/**
- * Función principal unificada para comunicarse con todas las IAs.
- * Maneja texto, historial, imágenes y parseo de respuestas complejas.
- */
 export async function procesarConsultaIA({
   activeModel,
   specificModel,
@@ -54,9 +50,6 @@ export async function procesarConsultaIA({
   const systemInstruction = PERSONAS[activePersona] || PERSONAS.default;
   let botReply = "";
 
-  // ---------------------------------------------------------
-  // 🟢 MOTOR GEMINI (Soporta Base64 Nativo)
-  // ---------------------------------------------------------
   if (activeModel === 'gemini') {
     const geminiHistory = history.map(m => ({ 
       role: m.role === 'user' ? 'user' : 'model', 
@@ -83,9 +76,6 @@ export async function procesarConsultaIA({
     botReply = data.candidates[0].content.parts[0].text;
   }
   
-  // ---------------------------------------------------------
-  // 🟣 MOTOR CLAUDE (Soporta Base64 Nativo)
-  // ---------------------------------------------------------
   else if (activeModel === 'claude') {
     const claudeHistory = history.map(m => ({ role: m.role, content: m.content }));
     const currentContent = [{ type: 'text', text: finalInput }];
@@ -117,9 +107,6 @@ export async function procesarConsultaIA({
     botReply = data.content[0].text;
   }
   
-  // ---------------------------------------------------------
-  // 🔵 MOTOR OPENAI / DEEPSEEK / ALIBABA / NVIDIA (Estándar)
-  // ---------------------------------------------------------
   else {
     let endpoint = '';
     if (activeModel === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -151,9 +138,6 @@ export async function procesarConsultaIA({
     botReply = data.choices[0].message.content;
   }
 
-  // ---------------------------------------------------------
-  // 🎬 INTERCEPTOR DEL DIRECTOR: Parseo automático del JSON
-  // ---------------------------------------------------------
   let directorPlan = null;
   let uiReply = botReply;
 
@@ -178,12 +162,39 @@ export async function procesarConsultaIA({
 }
 
 // ---------------------------------------------------------
-// 🎨 MOTOR DE IMAGEN 3 (GOOGLE AI STUDIO BLINDADO)
+// 🎨 MOTOR DE IMAGEN 3 (CON RADAR DINÁMICO)
 // ---------------------------------------------------------
 export async function generarImagenGoogle(prompt, apiKey) {
-  // 🔥 FIX DEFINITIVO: Endpoint oficial de Imagen 3 (002) en AI Studio
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+  let modelName = "";
+  let methodName = "predict";
   
+  // 1. RADAR: Preguntamos a Google qué modelos existen para esta API Key
+  try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (listRes.ok) {
+      const data = await listRes.json();
+      // Buscamos cualquier modelo de imagen (imagen-3.0-generate-001, 002, etc)
+      const imagenModel = data.models?.find(m => m.name.includes("imagen"));
+      if (imagenModel) {
+        modelName = imagenModel.name; 
+        if (imagenModel.supportedGenerationMethods) {
+          methodName = imagenModel.supportedGenerationMethods[0];
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Radar falló, usando versión base.");
+  }
+
+  // Si el radar no encuentra nada, forzamos el oficial estándar
+  if (!modelName) {
+    modelName = "models/imagen-3.0-generate-001";
+  }
+
+  // 2. CONSTRUIR URL EXACTA SEGÚN LO QUE RESPONDIÓ GOOGLE
+  const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:${methodName}?key=${apiKey}`;
+  
+  // 3. ENVIAR LA PETICIÓN
   let response;
   try {
     response = await fetch(url, {
@@ -191,7 +202,7 @@ export async function generarImagenGoogle(prompt, apiKey) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         instances: [{ prompt: prompt }],
-        parameters: { sampleCount: 1, aspectRatio: "16:9" } // Cambia a "9:16" si necesitas vertical
+        parameters: { sampleCount: 1, aspectRatio: "16:9" }
       })
     });
   } catch (e) {
@@ -206,19 +217,26 @@ export async function generarImagenGoogle(prompt, apiKey) {
   }
 
   if (!response.ok) {
+    if (response.status === 404) {
+       throw new Error(`[404] TU API KEY NO TIENE ACCESO: Tu cuenta de Google AI Studio aún no tiene habilitado Imagen 3. Necesitas habilitarlo o usar una API Key con permisos.`);
+    }
     const errorMsg = data?.error?.message || response.statusText;
     throw new Error(`[${response.status}] ${errorMsg}`);
   }
   
   if (data.error) throw new Error(data.error.message);
   
-  if (!data.predictions || data.predictions.length === 0) {
-    throw new Error("CENSURADO_POR_GOOGLE: El prompt activó los filtros de seguridad (Violencia, NSFW, Marcas, etc).");
-  }
-  
-  if (!data.predictions[0].bytesBase64Encoded) {
-     throw new Error("Google no devolvió los datos Base64 de la imagen.");
+  let base64Image = null;
+  // Google a veces devuelve "predictions" y a veces "generatedImages", atajamos ambas
+  if (data.predictions && data.predictions.length > 0) {
+     base64Image = data.predictions[0].bytesBase64Encoded;
+  } else if (data.generatedImages && data.generatedImages.length > 0) {
+     base64Image = data.generatedImages[0].image.imageBytes; 
   }
 
-  return data.predictions[0].bytesBase64Encoded;
+  if (!base64Image) {
+    throw new Error("CENSURADO_POR_GOOGLE: El prompt activó los filtros de seguridad (Violencia, NSFW, Marcas, etc).");
+  }
+
+  return base64Image;
 }
