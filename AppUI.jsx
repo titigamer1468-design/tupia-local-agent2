@@ -72,6 +72,7 @@ export default function AppUI() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
+  const [factoryImage, setFactoryImage] = useState(null); // 🔥 NUEVO ESTADO PARA LA IMAGEN DE INICIO 🔥
   
   const [keys, setKeys] = useState({ 
     gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', 
@@ -202,13 +203,28 @@ export default function AppUI() {
             let workflowParaModal = prompt;
             try { workflowParaModal = JSON.parse(prompt); } catch (e) { /* Era solo texto, está bien */ }
 
-            const respuestaWebhook = await conectarModalServerless(workflowParaModal, keys.videoWebhook);
+            // 🔥 ENVÍO DIRECTO CON IMAGEN ADJUNTA 🔥
+            const response = await fetch(keys.videoWebhook, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                workflow: workflowParaModal,
+                imagen_base64: factoryImage // Aquí viaja tu foto si la adjuntaste
+              })
+            });
             
-            // 🔥 MAGIA NUEVA: Extraer la imagen real y meterla al ZIP 🔥
-            if (respuestaWebhook.imagen_base64) {
-              zip.folder("Resultados_Visuales").file(`Imagen_Modal_${i+1}.png`, respuestaWebhook.imagen_base64, { base64: true });
-              // Borramos el código gigante del reporte para no saturar tu archivo de texto
-              respuestaWebhook.imagen_base64 = "✅ [IMAGEN PNG EXTRAÍDA Y GUARDADA EN CARPETA RESULTADOS_VISUALES]"; 
+            if (!response.ok) throw new Error("Fallo de conexión HTTP");
+            const respuestaWebhook = await response.json();
+            
+            // 🔥 GUARDAR FOTO O VIDEO EN EL ZIP 🔥
+            if (respuestaWebhook.archivo_base64) {
+              const ext = respuestaWebhook.extension || 'png';
+              zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.${ext}`, respuestaWebhook.archivo_base64, { base64: true });
+              respuestaWebhook.archivo_base64 = `✅ [ARCHIVO .${ext.toUpperCase()} EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`; 
+            } else if (respuestaWebhook.imagen_base64) { 
+              // Soporte para la versión antigua por si acaso
+              zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.png`, respuestaWebhook.imagen_base64, { base64: true });
+              respuestaWebhook.imagen_base64 = `✅ [ARCHIVO .PNG EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`;
             }
 
             reporteModal += `Tarea ${i+1}:\nOrden: ${prompt.substring(0,60)}...\nRespuesta Modal: ${JSON.stringify(respuestaWebhook)}\n\n`;
@@ -231,7 +247,6 @@ export default function AppUI() {
         
         setBatchProgress(i + 1);
 
-        // Descanso entre peticiones a Modal
         if (i < promptList.length - 1) {
           await new Promise(r => setTimeout(r, 3000));
         }
@@ -239,7 +254,6 @@ export default function AppUI() {
 
       setBatchStatus("Empaquetando resultados...");
       
-      // Guardamos el reporte de Modal en el ZIP siempre
       zip.file("Reporte_Modal_Serverless.txt", reporteModal);
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
@@ -454,6 +468,21 @@ export default function AppUI() {
                 className={`w-full bg-black border border-gray-700 rounded-lg p-3 text-sm font-mono h-64 outline-none resize-none focus:border-${factoryMode === 'image' ? 'cyan' : 'purple'}-500 ${factoryMode === 'image' ? 'text-cyan-400' : 'text-purple-400'}`}
                 placeholder={"Ejemplo de JSON ComfyUI:\n{\n  \"3\": {\n    \"class_type\": \"KSampler\",\n    ...\n  }\n}"}
               />
+              
+              {/* 🔥 BOTÓN PARA ADJUNTAR LA IMAGEN INICIAL 🔥 */}
+              <div className="mt-4 flex items-center gap-3">
+                <input type="file" id="factoryImg" className="hidden" accept="image/*" onChange={async (e) => {
+                    if(e.target.files[0]) {
+                        const b64 = await fileToBase64(e.target.files[0]);
+                        setFactoryImage(b64);
+                    }
+                }} />
+                <button onClick={() => document.getElementById('factoryImg').click()} className="bg-gray-800 text-xs px-4 py-2 rounded-lg text-gray-300 border border-gray-700 hover:text-white transition-colors">
+                    {factoryImage ? "✅ Imagen Cargada (Clic para cambiar)" : "📸 Adjuntar Imagen Inicial (Opcional)"}
+                </button>
+                {factoryImage && <button onClick={() => setFactoryImage(null)} className="text-red-400 text-xs font-bold">X Quitar</button>}
+              </div>
+
               <p className="text-xs text-gray-500 mt-2">
                 ⚡ Todo el procesamiento se envía ahora a tu servidor (configurado en la Bóveda).
               </p>
@@ -490,7 +519,7 @@ export default function AppUI() {
             {zipUrl && (
               <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-green-500 shadow-2xl shadow-green-500/20 text-center animate-in fade-in zoom-in duration-300">
                 <h3 className="text-base font-bold text-green-400 mb-3">✅ ¡ZIP Generado Exitosamente!</h3>
-                <p className="text-xs text-gray-400 mb-4">Adentro encontrarás tu imagen .png lista y el reporte completo de las tareas.</p>
+                <p className="text-xs text-gray-400 mb-4">Adentro encontrarás tu resultado final listo y el reporte completo de las tareas.</p>
                 <a href={zipUrl} download={`Resultados_${factoryMode.toUpperCase()}_Lote_${Date.now()}.zip`} className="w-full block text-center bg-green-600 py-4 rounded-xl font-bold hover:bg-green-500 transition-colors text-white shadow-lg shadow-green-600/30">
                   📥 DESCARGAR ZIP
                 </a>
@@ -588,7 +617,7 @@ export default function AppUI() {
             <div className="bg-gray-900 p-3 rounded-xl border border-gray-800">
               <label className="block text-sm font-bold text-green-400 mb-1">🔗 Webhook Universal (Modal / VPS)</label>
               <input type="text" value={keys.videoWebhook} onChange={(e) => setKeys(prev => ({...prev, videoWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-green-500 text-sm" placeholder="Ej: https://tu-url.modal.run..." />
-              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde la "Fábrica" enviará las peticiones JSON.</p>
+              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde la "Fábrica" enviará las peticiones JSON y las fotos que subas.</p>
             </div>
 
             {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
