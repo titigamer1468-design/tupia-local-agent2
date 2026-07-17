@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tupia-local-agent",
+  "name": "tupia-local-agent1",
   "compatibility_date": "2026-07-09",
   "compatibility_flags": [
     "nodejs_compat"
