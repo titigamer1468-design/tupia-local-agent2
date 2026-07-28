@@ -72,12 +72,13 @@ export default function AppUI() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
-  const [factoryImage, setFactoryImage] = useState(null); // 🔥 NUEVO ESTADO PARA LA IMAGEN DE INICIO 🔥
+  const [factoryImage, setFactoryImage] = useState(null);
   
+  // 🔥 CORRECCIÓN: SEPARAMOS MODAL Y VPS EN DOS VARIABLES INDEPENDIENTES 🔥
   const [keys, setKeys] = useState({ 
     gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', 
-    vpsUrl: 'http://localhost:5000', 
-    videoWebhook: '' 
+    modalWebhook: '', // 🎨 Para tu Súper Fábrica (Modal Serverless - ComfyUI)
+    vpsUrl: 'http://localhost:3000' // 🚀 Para tu Obrero Ubuntu VPS (Scraping & Render)
   });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -89,8 +90,8 @@ export default function AppUI() {
       gemini: localStorage.getItem('key_gemini') || '', openai: localStorage.getItem('key_openai') || '',
       claude: localStorage.getItem('key_claude') || '', deepseek: localStorage.getItem('key_deepseek') || '',
       alibaba: localStorage.getItem('key_alibaba') || '', nvidia: localStorage.getItem('key_nvidia') || '', ghl: localStorage.getItem('key_ghl') || '',
-      vpsUrl: localStorage.getItem('key_vpsUrl') || 'http://localhost:5000',
-      videoWebhook: localStorage.getItem('key_videoWebhook') || ''
+      modalWebhook: localStorage.getItem('key_modalWebhook') || '',
+      vpsUrl: localStorage.getItem('key_vpsUrl') || 'http://localhost:3000'
     };
     setKeys(loadedKeys);
     
@@ -157,20 +158,20 @@ export default function AppUI() {
   };
 
   // ==========================================================
-  // 🏭 ORQUESTADOR DE FÁBRICA (CONECTOR UNIVERSAL MODAL / VPS)
+  // 🏭 ORQUESTADOR DE FÁBRICA (APUNTA EXCLUSIVAMENTE A MODAL)
   // ==========================================================
   const handleBatchGeneration = async () => {
     const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
     if (promptList.length === 0) return alert("Pega tus instrucciones primero.");
 
-    if (!keys.videoWebhook) {
-      return alert("¡No has configurado tu Webhook (Modal o VPS) en la Bóveda!");
+    if (!keys.modalWebhook) {
+      return alert("¡No has configurado tu Webhook de Modal Serverless en la Bóveda!");
     }
 
     setIsBatching(true);
     setBatchTotal(promptList.length);
     setBatchProgress(0);
-    setBatchStatus(`Conectando con la Súper Fábrica en modo [${factoryMode.toUpperCase()}]...`);
+    setBatchStatus(`Conectando con Modal Serverless en modo [${factoryMode.toUpperCase()}]...`);
     setZipUrl(null);
     
     const erroresLote = [];
@@ -192,7 +193,7 @@ export default function AppUI() {
 
       for (let i = 0; i < promptList.length; i++) {
         const prompt = promptList[i];
-        setBatchStatus(`Procesando tarea [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
+        setBatchStatus(`Procesando tarea Modal [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
 
         let intentos = 0;
         let ultimoError = "";
@@ -201,28 +202,25 @@ export default function AppUI() {
         while (intentos < 3 && !exito) {
           try {
             let workflowParaModal = prompt;
-            try { workflowParaModal = JSON.parse(prompt); } catch (e) { /* Era solo texto, está bien */ }
+            try { workflowParaModal = JSON.parse(prompt); } catch (e) { /* Era solo texto */ }
 
-            // 🔥 ENVÍO DIRECTO CON IMAGEN ADJUNTA 🔥
-            const response = await fetch(keys.videoWebhook, {
+            const response = await fetch(keys.modalWebhook, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 workflow: workflowParaModal,
-                imagen_base64: factoryImage // Aquí viaja tu foto si la adjuntaste
+                imagen_base64: factoryImage
               })
             });
             
-            if (!response.ok) throw new Error("Fallo de conexión HTTP");
+            if (!response.ok) throw new Error("Fallo de conexión HTTP con Modal");
             const respuestaWebhook = await response.json();
             
-            // 🔥 GUARDAR FOTO O VIDEO EN EL ZIP 🔥
             if (respuestaWebhook.archivo_base64) {
               const ext = respuestaWebhook.extension || 'png';
               zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.${ext}`, respuestaWebhook.archivo_base64, { base64: true });
               respuestaWebhook.archivo_base64 = `✅ [ARCHIVO .${ext.toUpperCase()} EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`; 
             } else if (respuestaWebhook.imagen_base64) { 
-              // Soporte para la versión antigua por si acaso
               zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.png`, respuestaWebhook.imagen_base64, { base64: true });
               respuestaWebhook.imagen_base64 = `✅ [ARCHIVO .PNG EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`;
             }
@@ -234,7 +232,7 @@ export default function AppUI() {
             ultimoError = err.message || "Error desconocido";
             intentos++;
             if (intentos >= 3) break;
-            setBatchStatus(`🔄 Reintentando (${intentos}/3)...`);
+            setBatchStatus(`🔄 Reintentando en Modal (${intentos}/3)...`);
             await new Promise(r => setTimeout(r, 4000));
           }
         }
@@ -242,7 +240,7 @@ export default function AppUI() {
         if (!exito) {
           console.warn(`Fallo en item ${i+1}: ${ultimoError}`);
           erroresLote.push(`Item ${i+1}: ${ultimoError}`);
-          zip.folder("Errores").file(`ERROR_${i+1}.txt`, `Fallo al procesar.\nDatos: ${prompt}\nError: ${ultimoError}`);
+          zip.folder("Errores").file(`ERROR_${i+1}.txt`, `Fallo al procesar en Modal.\nDatos: ${prompt}\nError: ${ultimoError}`);
         }
         
         setBatchProgress(i + 1);
@@ -293,7 +291,8 @@ export default function AppUI() {
         setVideoResult(url);
       } 
       else {
-        setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor...");
+        if (!keys.vpsUrl) return alert("¡No has configurado la URL de tu Servidor VPS en la Bóveda!");
+        setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor VPS...");
         
         const base64Videos = await Promise.all(videoFiles.map(f => fileToBase64(f.file)));
         let audioBase64 = null;
@@ -309,7 +308,7 @@ export default function AppUI() {
           videoFormat
         };
 
-        setFfmpegLog(`[INFO] 🚀 Transmitiendo datos a la fábrica remota (${keys.vpsUrl})...`);
+        setFfmpegLog(`[INFO] 🚀 Transmitiendo datos a tu VPS Ubuntu (${keys.vpsUrl})...`);
         const response = await fetch(`${keys.vpsUrl}/api/webhook/render-batch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -320,7 +319,7 @@ export default function AppUI() {
         if (!response.ok) throw new Error(data.error || data.detalle || "Fallo en el Servidor VPS");
 
         setVideoResult(data.downloadUrl);
-        setFfmpegLog(`[INFO] ✅ ¡El Servidor completó el render en tiempo récord!`);
+        setFfmpegLog(`[INFO] ✅ ¡El Servidor VPS completó el render en tiempo récord!`);
       }
     } catch (error) {
       console.error(error);
@@ -442,7 +441,7 @@ export default function AppUI() {
         {activeTab === 'factory' && (
           <div className="p-6 space-y-6">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400 flex items-center gap-2">
-              🏭 Súper Fábrica Serverless
+              🏭 Súper Fábrica Serverless (Modal)
             </h2>
 
             <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4 shadow-lg shadow-black">
@@ -460,7 +459,7 @@ export default function AppUI() {
             
             <div className="bg-gray-900 p-4 rounded-xl border border-gray-800">
               <label className="block text-sm font-bold text-gray-300 mb-2">
-                Pega tus Instrucciones o JSON para Modal/VPS Aquí
+                Pega tus Instrucciones o JSON para Modal Aquí
               </label>
               <textarea 
                 value={batchInput} 
@@ -469,7 +468,6 @@ export default function AppUI() {
                 placeholder={"Ejemplo de JSON ComfyUI:\n{\n  \"3\": {\n    \"class_type\": \"KSampler\",\n    ...\n  }\n}"}
               />
               
-              {/* 🔥 BOTÓN PARA ADJUNTAR LA IMAGEN INICIAL 🔥 */}
               <div className="mt-4 flex items-center gap-3">
                 <input type="file" id="factoryImg" className="hidden" accept="image/*" onChange={async (e) => {
                     if(e.target.files[0]) {
@@ -484,7 +482,7 @@ export default function AppUI() {
               </div>
 
               <p className="text-xs text-gray-500 mt-2">
-                ⚡ Todo el procesamiento se envía ahora a tu servidor (configurado en la Bóveda).
+                ⚡ Todo el procesamiento se envía a tu servidor de Modal Serverless configurado en la Bóveda.
               </p>
             </div>
 
@@ -499,7 +497,7 @@ export default function AppUI() {
             ) : (
               <div className="space-y-4">
                 <button onClick={handleBatchGeneration} className={`w-full font-bold py-4 rounded-xl shadow-lg transition-all text-white ${factoryMode === 'image' ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'}`}>
-                  🚀 Disparar Tareas
+                  🚀 Disparar Tareas a Modal
                 </button>
                 
                 {batchStatus.includes('❌') && (
@@ -541,7 +539,7 @@ export default function AppUI() {
             
             {directorPlan && (
               <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
-                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} scenes.</span>
+                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} escenas.</span>
                 <p className="text-xs text-gray-400 mt-1">Textos de IA listos para estampar. Ajusta la fuente abajo.</p>
               </div>
             )}
@@ -609,25 +607,36 @@ export default function AppUI() {
           </div>
         )}
 
-        {/* TAB BÓVEDA */}
+        {/* TAB BÓVEDA CORREGIDA: DOS SECCIONES DIFERENCIADAS */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-4">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de Configuración</h2>
             
-            <div className="bg-gray-900 p-3 rounded-xl border border-gray-800">
-              <label className="block text-sm font-bold text-green-400 mb-1">🔗 Webhook Universal (Modal / VPS)</label>
-              <input type="text" value={keys.videoWebhook} onChange={(e) => setKeys(prev => ({...prev, videoWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-green-500 text-sm" placeholder="Ej: https://tu-url.modal.run..." />
-              <p className="text-[10px] text-gray-500 mt-1">Aquí es donde la "Fábrica" enviará las peticiones JSON y las fotos que subas.</p>
+            {/* 1. CAJA DE MODAL SERVERLESS */}
+            <div className="bg-gray-900 p-3 rounded-xl border border-cyan-800/50 shadow-md">
+              <label className="block text-sm font-bold text-cyan-400 mb-1">🎨 Webhook Modal Serverless (Súper Fábrica)</label>
+              <input type="text" value={keys.modalWebhook} onChange={(e) => setKeys(prev => ({...prev, modalWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 text-sm" placeholder="Ej: https://tu-usuario--tupia-super-factory...modal.run" />
+              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para generar imágenes publicitarias (FLUX/DreamShaper) y videos (SVD).</p>
             </div>
 
-            {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
-              <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800 mt-2">
-                <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">{id === 'ghl' ? 'GoHighLevel (CRM)' : id}</label>
-                <input type="password" value={keys[id]} onChange={(e) => setKeys(prev => ({...prev, [id]: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-blue-500 text-sm" placeholder="Pega tu token aquí..." />
-              </div>
-            ))}
+            {/* 2. CAJA DE SERVIDOR VPS UBUNTU */}
+            <div className="bg-gray-900 p-3 rounded-xl border border-purple-800/50 shadow-md">
+              <label className="block text-sm font-bold text-purple-400 mb-1">🚀 Servidor VPS Ubuntu (Obrero 24/7)</label>
+              <input type="text" value={keys.vpsUrl} onChange={(e) => setKeys(prev => ({...prev, vpsUrl: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-purple-500 text-sm" placeholder="Ej: http://185.240.x.x:3000" />
+              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para extraer leads de Google Maps en segundo plano y renderizar en Node.js.</p>
+            </div>
+
+            <div className="border-t border-gray-800 pt-2">
+              {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
+                <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800 mt-2">
+                  <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">{id === 'ghl' ? 'GoHighLevel (CRM)' : id}</label>
+                  <input type="password" value={keys[id]} onChange={(e) => setKeys(prev => ({...prev, [id]: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-blue-500 text-sm" placeholder="Pega tu token aquí..." />
+                </div>
+              ))}
+            </div>
+
             <button onClick={saveSettings} className={`w-full font-bold py-3 rounded-xl shadow-lg ${isSaved ? 'bg-green-600' : 'bg-blue-600'}`}>
-              {isSaved ? "✅ Guardado" : "💾 Guardar Ajustes"}
+              {isSaved ? "✅ Guardado en Bóveda" : "💾 Guardar Ajustes"}
             </button>
           </div>
         )}
