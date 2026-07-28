@@ -541,7 +541,7 @@ export default function AppUI() {
             
             {directorPlan && (
               <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
-                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} escenas.</span>
+                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} scenes.</span>
                 <p className="text-xs text-gray-400 mt-1">Textos de IA listos para estampar. Ajusta la fuente abajo.</p>
               </div>
             )}
