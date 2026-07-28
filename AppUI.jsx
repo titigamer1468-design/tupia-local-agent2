@@ -59,7 +59,7 @@ export default function AppUI() {
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
   const [videoFormat, setVideoFormat] = useState('vertical');
-  const [engineMode, setEngineMode] = useState('local'); 
+  const [engineMode, setEngineMode] = useState('vps'); 
   const [isRendering, setIsRendering] = useState(false);
   const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D modular listo para generar.");
   const [videoResult, setVideoResult] = useState(null);
@@ -73,12 +73,13 @@ export default function AppUI() {
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
   const [factoryImage, setFactoryImage] = useState(null);
+  const [factoryEngineMode, setFactoryEngineMode] = useState('vps'); // 🔥 NUEVO: Selector Nube vs Celular
   
-  // 🔥 CORRECCIÓN: SEPARAMOS MODAL Y VPS EN DOS VARIABLES INDEPENDIENTES 🔥
+  // CORRECCIÓN: SEPARAMOS MODAL Y VPS EN DOS VARIABLES INDEPENDIENTES
   const [keys, setKeys] = useState({ 
     gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', 
     modalWebhook: '', // 🎨 Para tu Súper Fábrica (Modal Serverless - ComfyUI)
-    vpsUrl: 'http://localhost:3000' // 🚀 Para tu Obrero Ubuntu VPS (Scraping & Render)
+    vpsUrl: 'http://localhost:3000' // 🚀 Para tu Obrero Ubuntu VPS (Scraping & Orquestación)
   });
 
   const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -157,9 +158,9 @@ export default function AppUI() {
     setVideoFiles(prev => [...prev, ...files.map(f => ({ file: f, name: f.name, id: Date.now() + Math.random() }))]);
   };
 
-  // ==========================================================
-  // 🏭 ORQUESTADOR DE FÁBRICA (APUNTA EXCLUSIVAMENTE A MODAL)
-  // ==========================================================
+  // =========================================================================
+  // 🏭 ORQUESTADOR DE FÁBRICA INTELIGENTE (NUBE VPS 24/7 vs CELULAR LOCAL)
+  // =========================================================================
   const handleBatchGeneration = async () => {
     const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
     if (promptList.length === 0) return alert("Pega tus instrucciones primero.");
@@ -169,10 +170,45 @@ export default function AppUI() {
     }
 
     setIsBatching(true);
+    setZipUrl(null);
+
+    // 🔥 MODO 1: ORQUESTACIÓN EN NUBE VPS (APAGA TU CELULAR AL INSTANTE)
+    if (factoryEngineMode === 'vps') {
+      if (!keys.vpsUrl) {
+        setIsBatching(false);
+        return alert("⚠️ Para procesar en segundo plano necesitas poner la URL de tu Servidor VPS en la Bóveda.");
+      }
+
+      setBatchStatus("🚀 Transmitiendo lote de instrucciones a tu Servidor VPS...");
+
+      try {
+        const response = await fetch(`${keys.vpsUrl}/api/orchestrate-factory`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            promptList,
+            modalWebhook: keys.modalWebhook,
+            factoryMode,
+            factoryImage
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Fallo en la comunicación con el VPS.");
+
+        setBatchStatus(`✅ ¡ÉXITO! ${data.mensaje || "El VPS tomó el control de la producción. ¡Ya puedes cerrar tu app!"}`);
+      } catch (err) {
+        setBatchStatus(`❌ Error con el VPS: ${err.message}`);
+      } finally {
+        setIsBatching(false);
+      }
+      return;
+    }
+
+    // 🔥 MODO 2: PROCESAMIENTO EN CELULAR (SE MANTIENE LA PANTALLA ABIERTA)
     setBatchTotal(promptList.length);
     setBatchProgress(0);
-    setBatchStatus(`Conectando con Modal Serverless en modo [${factoryMode.toUpperCase()}]...`);
-    setZipUrl(null);
+    setBatchStatus(`Conectando con Modal Serverless desde celular [${factoryMode.toUpperCase()}]...`);
     
     const erroresLote = [];
     let reporteModal = `=== REPORTE DE TAREAS (${factoryMode.toUpperCase()}) ===\n\n`;
@@ -193,7 +229,7 @@ export default function AppUI() {
 
       for (let i = 0; i < promptList.length; i++) {
         const prompt = promptList[i];
-        setBatchStatus(`Procesando tarea Modal [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
+        setBatchStatus(`Procesando tarea en celular [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
 
         let intentos = 0;
         let ultimoError = "";
@@ -437,11 +473,15 @@ export default function AppUI() {
           </div>
         )}
 
-        {/* TAB FÁBRICA HÍBRIDA */}
+        {/* TAB FÁBRICA HÍBRIDA (CON SELECTOR DE MOTOR EN NUBE O CELULAR) */}
         {activeTab === 'factory' && (
           <div className="p-6 space-y-6">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400 flex items-center gap-2">
-              🏭 Súper Fábrica Serverless (Modal)
+            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400 flex items-center justify-between">
+              <span>🏭 Súper Fábrica Serverless</span>
+              <select value={factoryEngineMode} onChange={(e) => setFactoryEngineMode(e.target.value)} className="bg-gray-900 text-xs text-white border border-gray-700 rounded-lg p-1 font-normal">
+                <option value="vps">☁️ Enviar a VPS 24/7 (Apagar Celular)</option>
+                <option value="celular">📱 Procesar en Celular (Abierto)</option>
+              </select>
             </h2>
 
             <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4 shadow-lg shadow-black">
@@ -481,23 +521,27 @@ export default function AppUI() {
                 {factoryImage && <button onClick={() => setFactoryImage(null)} className="text-red-400 text-xs font-bold">X Quitar</button>}
               </div>
 
-              <p className="text-xs text-gray-500 mt-2">
-                ⚡ Todo el procesamiento se envía a tu servidor de Modal Serverless configurado en la Bóveda.
+              <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                <span>{factoryEngineMode === 'vps' ? '☁️ Modo Nube Activo: El VPS tomará el control. Podrás cerrar tu celular apenas envíes la orden.' : '📱 Modo Celular: Tu pantalla deberá permanecer encendida hasta que termine el lote.'}</span>
               </p>
             </div>
 
             {isBatching ? (
               <div className="bg-gray-950 p-4 rounded-xl border border-cyan-800/50 text-center">
                 <p className="text-sm font-bold text-cyan-400 mb-2">{batchStatus}</p>
-                <div className="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
-                  <div className={`h-4 transition-all duration-300 ${factoryMode === 'image' ? 'bg-cyan-500' : 'bg-purple-500'}`} style={{ width: `${(batchProgress / batchTotal) * 100}%` }}></div>
-                </div>
-                <p className="text-xs text-gray-500">{batchProgress} de {batchTotal} tareas completadas</p>
+                {factoryEngineMode === 'celular' && (
+                  <>
+                    <div className="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
+                      <div className={`h-4 transition-all duration-300 ${factoryMode === 'image' ? 'bg-cyan-500' : 'bg-purple-500'}`} style={{ width: `${(batchProgress / batchTotal) * 100}%` }}></div>
+                    </div>
+                    <p className="text-xs text-gray-500">{batchProgress} de {batchTotal} tareas completadas</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
                 <button onClick={handleBatchGeneration} className={`w-full font-bold py-4 rounded-xl shadow-lg transition-all text-white ${factoryMode === 'image' ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'}`}>
-                  🚀 Disparar Tareas a Modal
+                  {factoryEngineMode === 'vps' ? '🚀 Disparar Producción a Nube VPS' : '🚀 Disparar Tareas en Celular'}
                 </button>
                 
                 {batchStatus.includes('❌') && (
@@ -607,23 +651,21 @@ export default function AppUI() {
           </div>
         )}
 
-        {/* TAB BÓVEDA CORREGIDA: DOS SECCIONES DIFERENCIADAS */}
+        {/* TAB BÓVEDA LIMPIA Y EXACTA */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-4">
             <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de Configuración</h2>
             
-            {/* 1. CAJA DE MODAL SERVERLESS */}
             <div className="bg-gray-900 p-3 rounded-xl border border-cyan-800/50 shadow-md">
               <label className="block text-sm font-bold text-cyan-400 mb-1">🎨 Webhook Modal Serverless (Súper Fábrica)</label>
               <input type="text" value={keys.modalWebhook} onChange={(e) => setKeys(prev => ({...prev, modalWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 text-sm" placeholder="Ej: https://tu-usuario--tupia-super-factory...modal.run" />
               <p className="text-[10px] text-gray-400 mt-1">Exclusivo para generar imágenes publicitarias (FLUX/DreamShaper) y videos (SVD).</p>
             </div>
 
-            {/* 2. CAJA DE SERVIDOR VPS UBUNTU */}
             <div className="bg-gray-900 p-3 rounded-xl border border-purple-800/50 shadow-md">
               <label className="block text-sm font-bold text-purple-400 mb-1">🚀 Servidor VPS Ubuntu (Obrero 24/7)</label>
               <input type="text" value={keys.vpsUrl} onChange={(e) => setKeys(prev => ({...prev, vpsUrl: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-purple-500 text-sm" placeholder="Ej: http://185.240.x.x:3000" />
-              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para extraer leads de Google Maps en segundo plano y renderizar en Node.js.</p>
+              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para orquestar la producción 24/7 de la Fábrica y renderizar videos en segundo plano sin tu celular.</p>
             </div>
 
             <div className="border-t border-gray-800 pt-2">
