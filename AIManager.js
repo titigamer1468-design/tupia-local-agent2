@@ -3,7 +3,7 @@
 // =================================================================
 
 export const MODEL_VERSIONS = {
-  openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
+  openai: [{ id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' }, { id: 'gpt-4o-mini', name: 'GPT-4o Mini' }, { id: 'gpt-4o', name: 'GPT-4o (Mejor)' }],
   claude: [{ id: 'claude-3-5-sonnet-20241022', name: 'Sonnet 3.5' }, { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5' }],
   gemini: [{ id: 'gemini-1.5-flash', name: '1.5 Flash' }, { id: 'gemini-1.5-pro', name: '1.5 Pro' }],
   deepseek: [{ id: 'deepseek-chat', name: 'V3 Chat' }, { id: 'deepseek-reasoner', name: 'R1 Reasoner' }],
