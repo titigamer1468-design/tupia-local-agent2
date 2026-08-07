@@ -2,17 +2,38 @@
 // 🎬 VideoEngine.js - MOTOR DE RENDERIZADO 3D (FFMPEG + CANVAS)
 // =================================================================
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { Capacitor } from '@capacitor/core';
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 let ffmpegInstance = null;
-let activeRender = null; 
+let activeRender = null;
 let isRendering = false;
 let renderSequence = 0;
 
 /**
- * 🛑 Cancela el renderizado en curso (si existe), purga el Worker y espera su cierre
+ * Detecta si la aplicación se está ejecutando dentro de Capacitor
+ * sin importar @capacitor/core.
+ */
+const isNativeRuntime = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const protocol = window.location?.protocol;
+
+  const capacitorGlobal =
+    globalThis?.Capacitor ||
+    window.Capacitor;
+
+  return (
+    protocol === "file:" ||
+    protocol === "capacitor:" ||
+    capacitorGlobal?.isNativePlatform?.() === true
+  );
+};
+
+/**
+ * 🛑 Cancela el renderizado en curso
  */
 export const cancelRender = async () => {
   renderSequence++;
@@ -24,7 +45,7 @@ export const cancelRender = async () => {
   }
 
   render.cancelled = true;
-  ffmpegInstance = null; // Invalida la caché global
+  ffmpegInstance = null;
 
   if (render.ffmpeg) {
     try {
@@ -34,14 +55,13 @@ export const cancelRender = async () => {
     }
   }
 
-  // Espera a que el finally de renderVideo() limpie las banderas
   if (render.renderStopped) {
     await render.renderStopped;
   }
 };
 
 /**
- * 🖼️ Generador de Capas Adaptativo
+ * 🖼️ Generador de capas adaptativo
  */
 export const createFrame = (
   file,
@@ -61,7 +81,6 @@ export const createFrame = (
 
     img.onload = () => {
       try {
-        // 🔥 Validación crítica: Evitar crashes con imágenes corruptas o vacías
         if (!img.width || !img.height) {
           URL.revokeObjectURL(url);
           resolve(null);
@@ -87,11 +106,9 @@ export const createFrame = (
           return;
         }
 
-        // Fondo
         ctx.fillStyle = "#050505";
         ctx.fillRect(0, 0, targetW, targetH);
 
-        // Cover: rellena completamente el canvas sin deformar
         const scale = Math.max(
           targetW / img.width,
           targetH / img.height
@@ -145,8 +162,7 @@ export const createFrame = (
           ctx.shadowOffsetY = 4;
 
           const lineHeight = safeFontSize + 20;
-          const totalHeight =
-            lines.length * lineHeight;
+          const totalHeight = lines.length * lineHeight;
 
           const firstY =
             targetH / 2 -
@@ -155,21 +171,21 @@ export const createFrame = (
 
           lines.forEach((line, index) => {
             const y = firstY + index * lineHeight;
+            const safeLine = line.slice(0, 180);
 
             ctx.strokeText(
-              line.slice(0, 180),
+              safeLine,
               targetW / 2,
               y
             );
 
             ctx.fillText(
-              line.slice(0, 180),
+              safeLine,
               targetW / 2,
               y
             );
           });
 
-          // Evita que las sombras afecten operaciones posteriores
           ctx.shadowColor = "transparent";
           ctx.shadowBlur = 0;
           ctx.shadowOffsetX = 0;
@@ -259,7 +275,7 @@ const getEffectForScene = (directorPlan, index) => {
 };
 
 /**
- * 🎬 Orquestador Principal FFMPEG
+ * 🎬 Orquestador principal FFmpeg
  */
 export async function renderVideo({
   videoFiles = [],
@@ -285,10 +301,10 @@ export async function renderVideo({
   }
 
   isRendering = true;
+
   const currentRenderId = ++renderSequence;
   let ffmpeg = null;
 
-  // 🔥 Nuevo contenedor de sesión para evitar colisiones y asegurar sincronía 🔥
   const renderState = {
     ffmpeg: null,
     cancelled: false,
@@ -303,9 +319,9 @@ export async function renderVideo({
 
   activeRender = renderState;
 
-  // Escudo contra condiciones de carrera
   const isRenderCancelled = () =>
-    currentRenderId !== renderSequence || renderState.cancelled;
+    currentRenderId !== renderSequence ||
+    renderState.cancelled;
 
   try {
     log(
@@ -315,10 +331,14 @@ export async function renderVideo({
     ffmpeg = ffmpegInstance;
 
     if (!ffmpeg) {
-      log("[INFO] 📥 Descargando Motor de Video FFmpeg WebAssembly...");
+      log(
+        "[INFO] 📥 Descargando Motor de Video FFmpeg WebAssembly..."
+      );
 
       ffmpeg = new FFmpeg();
-      renderState.ffmpeg = ffmpeg; // Registramos el Worker INMEDIATAMENTE
+
+      // Registramos el Worker inmediatamente para permitir cancelarlo.
+      renderState.ffmpeg = ffmpeg;
 
       ffmpeg.on("log", ({ message }) => {
         if (
@@ -330,16 +350,10 @@ export async function renderVideo({
         }
       });
 
-      // 📱 Detección segura y optimizada de Capacitor
-      const isCapacitor =
-        typeof window !== "undefined" &&
-        (
-          Capacitor?.isNativePlatform?.() === true ||
-          window.location.protocol === "file:" ||
-          window.location.protocol === "capacitor:"
-        );
+      const runningInsideNativeApp =
+        isNativeRuntime();
 
-      if (isCapacitor) {
+      if (runningInsideNativeApp) {
         log(
           "[INFO] 📱 Entorno App detectado: ensamblando FFmpeg en memoria..."
         );
@@ -377,14 +391,18 @@ export async function renderVideo({
         const coreURL = URL.createObjectURL(
           new Blob(
             [jsBuffer],
-            { type: "text/javascript" }
+            {
+              type: "text/javascript"
+            }
           )
         );
 
         const wasmURL = URL.createObjectURL(
           new Blob(
             [wasmBytes],
-            { type: "application/wasm" }
+            {
+              type: "application/wasm"
+            }
           )
         );
 
@@ -398,26 +416,33 @@ export async function renderVideo({
           URL.revokeObjectURL(wasmURL);
         }
       } else {
-        log("[INFO] 🌐 Entorno Web detectado: cargando FFmpeg remoto...");
+        log(
+          "[INFO] 🌐 Entorno Web detectado: cargando FFmpeg remoto..."
+        );
 
         const baseURL =
           "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
 
+        const coreURL = await toBlobURL(
+          `${baseURL}/ffmpeg-core.js`,
+          "text/javascript"
+        );
+
+        const wasmURL = await toBlobURL(
+          `${baseURL}/ffmpeg-core.wasm`,
+          "application/wasm"
+        );
+
         await ffmpeg.load({
-          coreURL: await toBlobURL(
-            `${baseURL}/ffmpeg-core.js`,
-            "text/javascript"
-          ),
-          wasmURL: await toBlobURL(
-            `${baseURL}/ffmpeg-core.wasm`,
-            "application/wasm"
-          )
+          coreURL,
+          wasmURL
         });
       }
 
-      // 🔥 Verificamos si no se canceló mientras cargaba
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
 
       ffmpegInstance = ffmpeg;
@@ -427,44 +452,59 @@ export async function renderVideo({
       );
     } else {
       renderState.ffmpeg = ffmpeg;
+
       log(
         "[INFO] ♻️ Reutilizando motor FFmpeg ya cargado."
       );
     }
 
     if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
-    // Validación extra para asegurar que la caché sigue viva
     try {
-      await cleanFFmpegFiles(ffmpeg, videoFiles.length);
+      await cleanFFmpegFiles(
+        ffmpeg,
+        videoFiles.length
+      );
     } catch {
       ffmpegInstance = null;
-      throw new Error("La instancia almacenada de FFmpeg no es válida.");
+
+      throw new Error(
+        "La instancia almacenada de FFmpeg no es válida."
+      );
     }
 
     if (isRenderCancelled()) {
-      throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
     log(
       `[INFO] ✍️ Preparando ${videoFiles.length} fotogramas...`
     );
 
-    // Normalización del formato de video
     const normalizedFormat =
-      videoFormat === "vertical" ? "vertical" : "horizontal";
+      videoFormat === "vertical"
+        ? "vertical"
+        : "horizontal";
 
     for (let i = 0; i < videoFiles.length; i++) {
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
 
       const textoIA =
         directorPlan?.[i]?.texto_pantalla || null;
 
-      const file = videoFiles[i]?.file || videoFiles[i];
+      const file =
+        videoFiles[i]?.file ||
+        videoFiles[i];
 
       const jpgBlob = await createFrame(
         file,
@@ -486,46 +526,68 @@ export async function renderVideo({
       );
 
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
     }
 
     if (audioFile) {
       log("[INFO] 🎵 Subiendo pista de audio...");
-      await ffmpeg.writeFile("audio.mp3", await fetchFile(audioFile));
+
+      await ffmpeg.writeFile(
+        "audio.mp3",
+        await fetchFile(audioFile)
+      );
 
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
     }
 
-    log("[INFO] 🎥 Ensamblando Secuencia de Video Inteligente...");
+    log(
+      "[INFO] 🎥 Ensamblando Secuencia de Video Inteligente..."
+    );
 
     const {
       width: targetW,
       height: targetH
     } = getVideoDimensions(normalizedFormat);
 
-    let ffmpegArgs = [];
+    const ffmpegArgs = [];
     let filterComplex = "";
     let duracionTotal = 0;
+
     const fadeDur = 1.0;
     const fps = 30;
 
     for (let i = 0; i < videoFiles.length; i++) {
-      const efectoAplicar = getEffectForScene(directorPlan, i);
-      const rawDuration = directorPlan?.[i]?.duracion;
-      const baseDur = Math.max(1, Number(rawDuration) || 5);
-      
+      const efectoAplicar =
+        getEffectForScene(directorPlan, i);
+
+      const rawDuration =
+        directorPlan?.[i]?.duracion;
+
+      const baseDur = Math.max(
+        1,
+        Number(rawDuration) || 5
+      );
+
       const fileDur = baseDur + fadeDur;
 
       ffmpegArgs.push(
-        "-loop", "1", 
-        "-framerate", `${fps}`, 
-        "-t", `${fileDur}`, 
-        "-i", `img${i}.jpg`
+        "-loop",
+        "1",
+        "-framerate",
+        `${fps}`,
+        "-t",
+        `${fileDur}`,
+        "-i",
+        `img${i}.jpg`
       );
-      
+
       duracionTotal += baseDur;
 
       let zoomPanStr = "";
@@ -595,8 +657,7 @@ export async function renderVideo({
           `:fps=${fps}`;
       }
 
-      // 🔥 Normalización Definitiva y sincronizada de transiciones
-      filterComplex += 
+      filterComplex +=
         `[${i}:v]${zoomPanStr},` +
         `fps=${fps},` +
         `settb=AVTB,` +
@@ -607,8 +668,10 @@ export async function renderVideo({
 
     if (audioFile) {
       ffmpegArgs.push(
-        "-stream_loop", "-1",
-        "-i", "audio.mp3"
+        "-stream_loop",
+        "-1",
+        "-i",
+        "audio.mp3"
       );
     }
 
@@ -619,36 +682,75 @@ export async function renderVideo({
       for (let i = 1; i < videoFiles.length; i++) {
         const previousDuration = Math.max(
           1,
-          Number(directorPlan?.[i - 1]?.duracion) || 5
+          Number(
+            directorPlan?.[i - 1]?.duracion
+          ) || 5
         );
+
         currentOffset += previousDuration;
-        
-        const isLast = (i === videoFiles.length - 1);
-        const nextNode = isLast ? "[outv]" : `[xf${i}]`;
-        
-        filterComplex += `${lastNode}[v${i}]xfade=transition=fade:duration=${fadeDur}:offset=${currentOffset}${nextNode}`;
-        
-        if (!isLast) filterComplex += ";";
+
+        const isLast =
+          i === videoFiles.length - 1;
+
+        const nextNode = isLast
+          ? "[outv]"
+          : `[xf${i}]`;
+
+        filterComplex +=
+          `${lastNode}[v${i}]` +
+          `xfade=transition=fade:` +
+          `duration=${fadeDur}:` +
+          `offset=${currentOffset}` +
+          `${nextNode}`;
+
+        if (!isLast) {
+          filterComplex += ";";
+        }
+
         lastNode = nextNode;
       }
-      
-      ffmpegArgs.push("-filter_complex", filterComplex, "-map", "[outv]");
+
+      ffmpegArgs.push(
+        "-filter_complex",
+        filterComplex,
+        "-map",
+        "[outv]"
+      );
     } else {
       filterComplex = filterComplex.slice(0, -1);
-      ffmpegArgs.push("-filter_complex", filterComplex, "-map", "[v0]");
+
+      ffmpegArgs.push(
+        "-filter_complex",
+        filterComplex,
+        "-map",
+        "[v0]"
+      );
     }
 
     if (audioFile) {
       const audioInputIndex = videoFiles.length;
-      ffmpegArgs.push("-map", `${audioInputIndex}:a`, "-c:a", "aac", "-b:a", "192k");
+
+      ffmpegArgs.push(
+        "-map",
+        `${audioInputIndex}:a`,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k"
+      );
     }
 
     ffmpegArgs.push(
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-      "-t", `${duracionTotal}`
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      "-t",
+      `${duracionTotal}`
     );
 
     if (audioFile) {
@@ -657,48 +759,69 @@ export async function renderVideo({
 
     ffmpegArgs.push("output.mp4");
 
-    log(`[INFO] 🚀 Renderizando video localmente (Tiempo Total Exacto: ${duracionTotal}s)...`);
+    log(
+      `[INFO] 🚀 Renderizando video localmente ` +
+      `(Tiempo Total Exacto: ${duracionTotal}s)...`
+    );
 
     if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
     let codigoRetorno;
+
     try {
       codigoRetorno = await ffmpeg.exec(ffmpegArgs);
     } catch (error) {
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
+
       throw error;
     }
 
     if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
     if (codigoRetorno !== 0) {
-        throw new Error(`El motor de video falló. Revisa que las imágenes no estén corruptas.`);
+      throw new Error(
+        "El motor de video falló. Revisa que las imágenes no estén corruptas."
+      );
     }
 
     if (isRenderCancelled()) {
-      throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
     log("[INFO] 💾 Empaquetando archivo MP4...");
 
     let data;
+
     try {
       data = await ffmpeg.readFile("output.mp4");
     } catch (error) {
       if (isRenderCancelled()) {
-        throw new Error("El renderizado fue cancelado.");
+        throw new Error(
+          "El renderizado fue cancelado."
+        );
       }
+
       throw error;
     }
 
     if (isRenderCancelled()) {
-      throw new Error("El renderizado fue cancelado.");
+      throw new Error(
+        "El renderizado fue cancelado."
+      );
     }
 
     const videoBlob = new Blob([data], {
@@ -707,28 +830,32 @@ export async function renderVideo({
 
     const videoUrl = URL.createObjectURL(videoBlob);
 
-    log(`[INFO] ✅ Vídeo generado correctamente: ${duracionTotal}s`);
+    log(
+      `[INFO] ✅ Vídeo generado correctamente: ${duracionTotal}s`
+    );
 
     return videoUrl;
-
   } finally {
     if (ffmpeg && !renderState.cancelled) {
-      await cleanFFmpegFiles(ffmpeg, videoFiles.length);
+      await cleanFFmpegFiles(
+        ffmpeg,
+        videoFiles.length
+      );
     }
 
-    // Evita dejar en caché accidentalmente una instancia que fue cancelada y terminada.
-    if (ffmpegInstance === ffmpeg && renderState.cancelled) {
+    if (
+      ffmpegInstance === ffmpeg &&
+      renderState.cancelled
+    ) {
       ffmpegInstance = null;
     }
 
-    // Liberamos la referencia del motor activo si corresponde a esta ejecución
     if (activeRender === renderState) {
-        activeRender = null;
+      activeRender = null;
     }
 
     isRendering = false;
 
-    // Liberamos el candado de cancelación
     if (resolveRenderStop) {
       resolveRenderStop();
     }
