@@ -1,34 +1,20 @@
 {
-  "name": "tupia-local-agent",
-  "version": "1.0.0",
+  "name": "tupia-video-app",
   "private": true,
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "npm run build && wrangler deploy",
-    "worker:dev": "wrangler dev"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@ffmpeg/ffmpeg": "^0.12.6",
-    "@ffmpeg/util": "^0.12.1",
-    "@langchain/langgraph": "^0.0.32",
-    "ai": "^3.4.33",
-    "diff-match-patch": "^1.0.5",
-    "framer-motion": "^11.18.2",
-    "konva": "^9.3.22",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-konva": "^18.2.16",
-    "web-tree-sitter": "^0.20.8",
-    "zustand": "^4.5.7"
+    "@capacitor/core": "^7.4.3",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.7.0",
-    "vite": "^6.4.3",
-    "wrangler": "^4.0.0"
-    "@capacitor/core": "^7.4.3"
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.0"
   }
 }
