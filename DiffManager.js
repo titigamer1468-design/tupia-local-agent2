@@ -1,93 +1,218 @@
+// ============================================================================
 // DiffManager.js
+// Parser y aplicador seguro de bloques SEARCH / REPLACE
+// ============================================================================
 
-// 1. Importación de la librería diff-match-patch desde ruta local
-import DiffMatchPatch from '../lib/diff-match-patch.js';
+import { diff_match_patch } from "diff-match-patch";
 
-// Instancia global de dmp, compartible por todo el módulo
-const dmp = new DiffMatchPatch();
+const dmp = new diff_match_patch();
 
-// 2. Procesador de bloques de reemplazo IA
+dmp.Match_Threshold = 0.2;
+dmp.Match_Distance = 2000;
+
+const SEARCH_MARKER = "<<<<<<< SEARCH";
+const SEPARATOR_MARKER = "=======";
+const REPLACE_MARKER = ">>>>>>> REPLACE";
+
+const normalizarSaltos = (texto) => {
+  return String(texto ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+};
+
 /**
- * Analiza un bloque de reemplazo IA con el formato delimitado y lo parsea.
- * Ejemplo esperado:
+ * Analiza un bloque con este formato:
+ *
  * <<<<<<< SEARCH
- * ...texto a buscar...
+ * código original
  * =======
- * ...nuevo texto propuesto...
+ * código nuevo
  * >>>>>>> REPLACE
- * @param {string} textoIA
- * @returns {{ textoSearch: string, textoReplace: string }}
- * @throws Error si el bloque no coincide con el formato exigido
  */
 export function analizarBloqueReemplazo(textoIA) {
-  // Expresión regular robusta para los delimitadores (insensible a espacios)
-  const regex = /<<<<<<<\s*SEARCH\s*\n([\s\S]*?)^=======\s*\n([\s\S]*?)^>>>>>>> REPLACE\s*$/m;
-
-  const match = textoIA.match(regex);
-  if (!match) {
+  if (
+    typeof textoIA !== "string" ||
+    !textoIA.trim()
+  ) {
     throw new Error(
-      "Formato de reemplazo inválido: delimitadores <<<<<<< SEARCH / ======= / >>>>>>> REPLACE no encontrados."
+      "El bloque de reemplazo está vacío."
     );
   }
-  // Extraemos y limpiamos bordes
-  const textoSearch = match[1].trim();
-  const textoReplace = match[2].trim();
 
-  return { textoSearch, textoReplace };
-}
+  const texto = normalizarSaltos(textoIA);
 
-// 3. Configuración explícita del fuzzy matching (resiliencia IA)
-dmp.Match_Threshold = 0.5;    // Intermedia: menos estricto
-dmp.Match_Distance = 1000;    // Amplitud de búsqueda amplia
+  const inicio = texto.indexOf(
+    SEARCH_MARKER
+  );
 
-// 4. Motor de parcheo
+  const separador = texto.indexOf(
+    SEPARATOR_MARKER,
+    inicio + SEARCH_MARKER.length
+  );
+
+  const fin = texto.indexOf(
+    REPLACE_MARKER,
+    separador + SEPARATOR_MARKER.length
+  );
+
+  if (
+    inicio === -1 ||
+    separador === -1 ||
+    fin === -1 ||
+    separador <= inicio ||
+    fin <= separador
+  ) {
+    throw new Error(
+      "Formato inválido. Se esperaba SEARCH, ======= y REPLACE."
+    );
+  }
+
+  const textoSearch = texto
+    .slice(
+      inicio + SEARCH_MARKER.length,
+      separador
+    )
+    .replace(/^\n/, "")
+    .trimEnd();
+
+  const textoReplace = texto
+    .slice(
+      separador + SEPARATOR_MARKER.length,
+      fin
+    )
+    .replace(/^\n/, "")
+    .trimEnd();
+
+  if (!textoSearch.trim()) {
+    throw new Error(
+      "El bloque SEARCH no puede estar vacío."
+    );
+  }
+
+  return {
+    textoSearch,
+    textoReplace
+  };
+};
+
 /**
- * Aplica un cambio inteligente tipo diff-match-patch sobre un texto original.
- * @param {string} textoOriginal   - Código fuente actual
- * @param {{ textoSearch: string, textoReplace: string }} bloques - Bloques del parser
- * @returns {{ exito: boolean, textoModificado: string }}
+ * Aplica un cambio sobre un texto original.
+ *
+ * Primero intenta coincidencia exacta.
+ * Si no existe, intenta patch fuzzy.
+ * Si el parche no se aplica completamente, cancela la operación.
  */
-export function aplicarCambio(textoOriginal, bloques) {
+export function aplicarCambio(
+  textoOriginal,
+  bloques
+) {
   try {
-    const { textoSearch, textoReplace } = bloques;
+    const original = normalizarSaltos(
+      textoOriginal
+    );
 
-    // a) Localizar el bloque search usando fuzzy matching
-    const indice = dmp.match_main(textoOriginal, textoSearch, 0);
+    const textoSearch = normalizarSaltos(
+      bloques?.textoSearch
+    );
 
-    if (indice === -1) {
+    const textoReplace = normalizarSaltos(
+      bloques?.textoReplace
+    );
+
+    if (!original.trim()) {
       throw new Error(
-        "El bloque SEARCH no coincide con ningún fragmento del archivo original. Cancelando parche."
+        "El texto original está vacío."
       );
     }
 
-    // b) Calcula la diferencia y diffs
-    const diffs = dmp.diff_main(textoSearch, textoReplace);
-    dmp.diff_cleanupSemantic(diffs); // Limpieza opcional
+    if (!textoSearch.trim()) {
+      throw new Error(
+        "El texto SEARCH está vacío."
+      );
+    }
 
-    // c) Crear el parche (basado en solo el fragmento afectado)
-    const parches = dmp.patch_make(textoSearch, textoReplace, diffs);
+    const primeraCoincidencia =
+      original.indexOf(textoSearch);
 
-    // d) Aplicar el parche únicamente sobre el fragmento detectado
-    // Necesitamos reemplazar (en textoOriginal) solo la zona donde match_main dio positivo
-    //      original = [antes] + textoSearch + [despues]
-    //      => reemplazar textoSearch por textoReplace en ese segmento
+    const segundaCoincidencia =
+      original.indexOf(
+        textoSearch,
+        primeraCoincidencia + 1
+      );
 
-    const textoAntes = textoOriginal.slice(0, indice);
-    const textoMatch = textoOriginal.slice(indice, indice + textoSearch.length);
-    const textoDespues = textoOriginal.slice(indice + textoSearch.length);
+    if (primeraCoincidencia !== -1) {
+      if (segundaCoincidencia !== -1) {
+        throw new Error(
+          "El bloque SEARCH aparece varias veces. " +
+          "Incluye más contexto para hacerlo único."
+        );
+      }
 
-    // Aseguramos que el trozo desde el índice coincide para parchar correctamente
-    const [textoParcheado] = dmp.patch_apply(
-      parches,
-      textoMatch
+      const resultado =
+        original.slice(0, primeraCoincidencia) +
+        textoReplace +
+        original.slice(
+          primeraCoincidencia + textoSearch.length
+        );
+
+      return {
+        exito: true,
+        metodo: "exacto",
+        textoModificado: resultado
+      };
+    }
+
+    const parches = dmp.patch_make(
+      textoSearch,
+      textoReplace
     );
 
-    // Reunimos todo
-    const textoModificado = textoAntes + textoParcheado + textoDespues;
+    const [
+      textoModificado,
+      resultados
+    ] = dmp.patch_apply(
+      parches,
+      original
+    );
 
-    return { exito: true, textoModificado };
-  } catch (err) {
-    // Gestión clara de errores
-    throw new Error(`Error al aplicar el parche: ${err.message}`);
+    const aplicacionCompleta =
+      Array.isArray(resultados) &&
+      resultados.length > 0 &&
+      resultados.every(Boolean);
+
+    if (!aplicacionCompleta) {
+      throw new Error(
+        "El bloque SEARCH no coincide con el archivo. " +
+        "El parche fue cancelado."
+      );
+    }
+
+    return {
+      exito: true,
+      metodo: "fuzzy",
+      textoModificado
+    };
+  } catch (error) {
+    throw new Error(
+      `Error al aplicar el parche: ${
+        error?.message || "Error desconocido"
+      }`
+    );
   }
+}
+
+/**
+ * Analiza y aplica directamente un bloque IA.
+ */
+export function aplicarBloque(
+  textoOriginal,
+  textoIA
+) {
+  const bloques =
+    analizarBloqueReemplazo(textoIA);
+
+  return aplicarCambio(
+    textoOriginal,
+    bloques
+  );
 }

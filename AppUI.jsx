@@ -1,320 +1,600 @@
-import React, { useState, useRef, useEffect } from "react";
-import { MODEL_VERSIONS, PERSONAS, procesarConsultaIA, conectarModalServerless, generarImagenIA } from './AIManager.js';
-import { renderVideo } from './VideoEngine.js';
+import React, { useEffect, useRef, useState } from "react";
+import {
+  MODEL_VERSIONS,
+  procesarConsultaIA
+} from "./AIManager.js";
+import { renderVideo } from "./VideoEngine.js";
 
-const fileToBase64 = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.readAsDataURL(file);
-  reader.onload = () => resolve(reader.result);
-  reader.onerror = error => reject(error);
-});
+const API_BASE = "";
+
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () =>
+      reject(new Error(`No se pudo leer el archivo ${file.name}`));
+
+    reader.readAsDataURL(file);
+  });
+
+const readJsonResponse = async (response) => {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.includes("application/json")) {
+    const text = await response.text();
+    throw new Error(
+      text || `Respuesta inválida del servidor. HTTP ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        data?.detalle ||
+        `Error HTTP ${response.status}`
+    );
+  }
+
+  return data;
+};
 
 const CodeBlock = ({ lang, code }) => {
-  const handleCopy = () => navigator.clipboard.writeText(code.trim());
+  const safeCode = typeof code === "string" ? code.trim() : "";
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(safeCode);
+    } catch {
+      alert("No se pudo copiar el código.");
+    }
+  };
+
   const handleDownload = () => {
-    const blob = new Blob([code.trim()], { type: 'text/plain' });
+    const blob = new Blob([safeCode], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `codigo.${lang || 'txt'}`;
-    a.click();
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = `codigo.${lang || "txt"}`;
+    anchor.click();
+
     URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="my-4 bg-gray-950 rounded-xl overflow-hidden border border-gray-700 shadow-lg">
-      <div className="flex justify-between items-center px-4 py-2 bg-gray-800 text-xs font-bold text-gray-300">
-        <span className="uppercase">{lang || 'TEXTO'}</span>
+    <div className="my-4 overflow-hidden rounded-xl border border-gray-700 bg-gray-950 shadow-lg">
+      <div className="flex items-center justify-between bg-gray-800 px-4 py-2 text-xs font-bold text-gray-300">
+        <span className="uppercase">{lang || "TEXTO"}</span>
+
         <div className="flex gap-3">
-          <button onClick={handleCopy} className="hover:text-white transition-colors">📋 Copiar</button>
-          <button onClick={handleDownload} className="hover:text-white transition-colors">💾 Bajar</button>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="transition-colors hover:text-white"
+          >
+            📋 Copiar
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="transition-colors hover:text-white"
+          >
+            💾 Bajar
+          </button>
         </div>
       </div>
-      <pre className="p-4 overflow-x-auto text-xs text-green-400 font-mono"><code>{code.trim()}</code></pre>
+
+      <pre className="overflow-x-auto p-4 font-mono text-xs text-green-400">
+        <code>{safeCode}</code>
+      </pre>
     </div>
   );
 };
+
+const getInitialChat = () => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  title: "Nuevo Chat",
+  messages: []
+});
 
 export default function AppUI() {
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [attachments, setAttachments] = useState([]); 
-  const chatBottomRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const [activeTab, setActiveTab] = useState('chat');
-  const [isSaved, setIsSaved] = useState(false);
+
+  const [activeTab, setActiveTab] = useState("chat");
   const [logs, setLogs] = useState([]);
-  
-  const [activeModel, setActiveModel] = useState('openai'); 
-  const [specificModel, setSpecificModel] = useState('gpt-4o-mini'); 
-  const [activePersona, setActivePersona] = useState('director');
-  
-  // ESTADOS DEL ESTUDIO DE VIDEO
+
+  const [activeModel, setActiveModel] = useState("openai");
+  const [specificModel, setSpecificModel] = useState("gpt-4o-mini");
+  const [activePersona, setActivePersona] = useState("director");
+
+  // ESTUDIO
   const [videoFiles, setVideoFiles] = useState([]);
   const [audioFile, setAudioFile] = useState(null);
-  const [directorPlan, setDirectorPlan] = useState(null); 
+  const [directorPlan, setDirectorPlan] = useState(null);
   const [fontSize, setFontSize] = useState(90);
   const [textColor, setTextColor] = useState("#FF0050");
-  const [videoFormat, setVideoFormat] = useState('vertical');
-  const [engineMode, setEngineMode] = useState('vps'); 
+  const [videoFormat, setVideoFormat] = useState("vertical");
+  const [engineMode, setEngineMode] = useState("vps");
   const [isRendering, setIsRendering] = useState(false);
-  const [ffmpegLog, setFfmpegLog] = useState("🎬 Motor 3D modular listo para generar.");
+  const [ffmpegLog, setFfmpegLog] = useState(
+    "🎬 Motor 3D modular listo para generar."
+  );
   const [videoResult, setVideoResult] = useState(null);
 
-  // 🔥 ESTADOS DE LA FÁBRICA HÍBRIDA 🔥
-  const [factoryMode, setFactoryMode] = useState('image'); 
+  // FÁBRICA
+  const [factoryMode, setFactoryMode] = useState("image");
+  const [factoryEngineMode, setFactoryEngineMode] = useState("vps");
   const [batchInput, setBatchInput] = useState("");
+  const [factoryImage, setFactoryImage] = useState(null);
+
   const [isBatching, setIsBatching] = useState(false);
-  const [batchStatus, setBatchStatus] = useState("Esperando instrucciones...");
+  const [batchStatus, setBatchStatus] = useState(
+    "Esperando instrucciones..."
+  );
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
-  const [factoryImage, setFactoryImage] = useState(null);
-  const [factoryEngineMode, setFactoryEngineMode] = useState('vps'); // 🔥 NUEVO: Selector Nube vs Celular
-  
-  // CORRECCIÓN: SEPARAMOS MODAL Y VPS EN DOS VARIABLES INDEPENDIENTES
-  const [keys, setKeys] = useState({ 
-    gemini: '', openai: '', claude: '', deepseek: '', alibaba: '', nvidia: '', ghl: '', 
-    modalWebhook: '', // 🎨 Para tu Súper Fábrica (Modal Serverless - ComfyUI)
-    vpsUrl: 'http://localhost:3000' // 🚀 Para tu Obrero Ubuntu VPS (Scraping & Orquestación)
-  });
 
-  const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  const [isSettingsSaved, setIsSettingsSaved] = useState(false);
 
-  useEffect(() => { if (MODEL_VERSIONS[activeModel]) setSpecificModel(MODEL_VERSIONS[activeModel][0].id); }, [activeModel]);
+  const chatBottomRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const factoryImageInputRef = useRef(null);
+  const studioUploadRef = useRef(null);
+  const audioUploadRef = useRef(null);
+
+  const addLog = (message) => {
+    setLogs((previous) => [
+      ...previous,
+      `[${new Date().toLocaleTimeString()}] ${message}`
+    ]);
+  };
+
+  const activeChat = chats.find((chat) => chat.id === currentChatId) || {
+    messages: []
+  };
 
   useEffect(() => {
-    const loadedKeys = {
-      gemini: localStorage.getItem('key_gemini') || '', openai: localStorage.getItem('key_openai') || '',
-      claude: localStorage.getItem('key_claude') || '', deepseek: localStorage.getItem('key_deepseek') || '',
-      alibaba: localStorage.getItem('key_alibaba') || '', nvidia: localStorage.getItem('key_nvidia') || '', ghl: localStorage.getItem('key_ghl') || '',
-      modalWebhook: localStorage.getItem('key_modalWebhook') || '',
-      vpsUrl: localStorage.getItem('key_vpsUrl') || 'http://localhost:3000'
-    };
-    setKeys(loadedKeys);
-    
-    const savedChats = localStorage.getItem('tupia_chats');
-    let parsedChats = savedChats ? JSON.parse(savedChats) : [];
-    if (parsedChats.length > 0) {
+    const savedChats = localStorage.getItem("tupia_chats");
+    const savedCurrentChat = localStorage.getItem("tupia_current_chat");
+
+    let parsedChats = [];
+
+    try {
+      parsedChats = savedChats ? JSON.parse(savedChats) : [];
+    } catch {
+      parsedChats = [];
+    }
+
+    if (Array.isArray(parsedChats) && parsedChats.length > 0) {
       setChats(parsedChats);
-      setCurrentChatId(localStorage.getItem('tupia_current_chat') || parsedChats[0].id);
-      addLog("[OK] Sistema iniciado.");
-    } else { createNewChat(); }
+      setCurrentChatId(
+        savedCurrentChat &&
+          parsedChats.some((chat) => chat.id === savedCurrentChat)
+          ? savedCurrentChat
+          : parsedChats[0].id
+      );
+    } else {
+      const newChat = getInitialChat();
+      setChats([newChat]);
+      setCurrentChatId(newChat.id);
+    }
+
+    addLog("[OK] Aplicación iniciada mediante Cloudflare.");
   }, []);
 
   useEffect(() => {
     if (chats.length > 0) {
-      localStorage.setItem('tupia_chats', JSON.stringify(chats));
-      if (currentChatId) localStorage.setItem('tupia_current_chat', currentChatId);
+      localStorage.setItem("tupia_chats", JSON.stringify(chats));
+    }
+
+    if (currentChatId) {
+      localStorage.setItem("tupia_current_chat", currentChatId);
     }
   }, [chats, currentChatId]);
 
-  useEffect(() => { if (activeTab === 'chat' && chatBottomRef.current) chatBottomRef.current.scrollIntoView({ behavior: 'smooth' }); }, [chats, currentChatId, activeTab]);
+  useEffect(() => {
+    if (
+      activeTab === "chat" &&
+      chatBottomRef.current
+    ) {
+      chatBottomRef.current.scrollIntoView({
+        behavior: "smooth"
+      });
+    }
+  }, [chats, currentChatId, activeTab]);
+
+  useEffect(() => {
+    if (MODEL_VERSIONS[activeModel]?.length > 0) {
+      setSpecificModel(MODEL_VERSIONS[activeModel][0].id);
+    }
+  }, [activeModel]);
+
+  useEffect(() => {
+    return () => {
+      if (zipUrl) {
+        URL.revokeObjectURL(zipUrl);
+      }
+    };
+  }, [zipUrl]);
 
   const createNewChat = () => {
-    const newId = Date.now().toString();
-    setChats(prev => [{ id: newId, title: "Nuevo Chat", messages: [] }, ...prev]);
-    setCurrentChatId(newId); setIsSidebarOpen(false);
+    const newChat = getInitialChat();
+
+    setChats((previous) => [newChat, ...previous]);
+    setCurrentChatId(newChat.id);
+    setIsSidebarOpen(false);
+    setActiveTab("chat");
   };
 
-  const deleteChat = (id) => {
-    if (window.confirm("¿Seguro que quieres borrar este chat?")) {
-      const newChats = chats.filter(c => c.id !== id);
-      if (newChats.length === 0) createNewChat(); else { setChats(newChats); if (currentChatId === id) setCurrentChatId(newChats[0].id); }
+  const deleteChat = (chatId) => {
+    if (!window.confirm("¿Seguro que quieres borrar este chat?")) {
+      return;
+    }
+
+    const remainingChats = chats.filter((chat) => chat.id !== chatId);
+
+    if (remainingChats.length === 0) {
+      const newChat = getInitialChat();
+      setChats([newChat]);
+      setCurrentChatId(newChat.id);
+      return;
+    }
+
+    setChats(remainingChats);
+
+    if (currentChatId === chatId) {
+      setCurrentChatId(remainingChats[0].id);
     }
   };
 
   const saveSettings = () => {
-    Object.entries(keys).forEach(([provider, key]) => localStorage.setItem(`key_${provider}`, key));
-    setIsSaved(true); setTimeout(() => setIsSaved(false), 2000);
-    addLog("[INFO] Configuración guardada en Bóveda.");
+    setIsSettingsSaved(true);
+    addLog("[INFO] Configuración visual guardada.");
+    setTimeout(() => setIsSettingsSaved(false), 2000);
   };
 
-  const handleFileChange = async (e) => {
-    const files = Array.from(e.target.files);
+  const handleFileChange = async (event) => {
+    const files = Array.from(event.target.files || []);
     const newAttachments = [];
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        await new Promise(res => reader.onload = () => {
-          newAttachments.push({ type: 'image', name: file.name, mime: file.type, data: reader.result });
-          res();
-        });
-      } else {
-        const text = await file.text();
-        newAttachments.push({ type: 'text', name: file.name, data: text });
+
+    try {
+      for (const file of files) {
+        if (file.type.startsWith("image/")) {
+          const data = await fileToBase64(file);
+
+          newAttachments.push({
+            type: "image",
+            name: file.name,
+            mime: file.type,
+            data
+          });
+        } else {
+          const text = await file.text();
+
+          newAttachments.push({
+            type: "text",
+            name: file.name,
+            data: text
+          });
+        }
+      }
+
+      setAttachments((previous) => [...previous, ...newAttachments]);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
       }
     }
-    setAttachments(prev => [...prev, ...newAttachments]);
-    fileInputRef.current.value = ""; 
   };
 
-  const handleStudioMedia = (e) => {
-    const files = Array.from(e.target.files);
-    setVideoFiles(prev => [...prev, ...files.map(f => ({ file: f, name: f.name, id: Date.now() + Math.random() }))]);
+  const handleStudioMedia = (event) => {
+    const files = Array.from(event.target.files || []);
+
+    const newFiles = files.map((file) => ({
+      file,
+      name: file.name,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }));
+
+    setVideoFiles((previous) => [...previous, ...newFiles]);
+
+    if (studioUploadRef.current) {
+      studioUploadRef.current.value = "";
+    }
   };
 
-  // =========================================================================
-  // 🏭 ORQUESTADOR DE FÁBRICA INTELIGENTE (NUBE VPS 24/7 vs CELULAR LOCAL)
-  // =========================================================================
+  const handleFactoryImageChange = async (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const base64 = await fileToBase64(file);
+      setFactoryImage(base64);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const parseWorkflow = (value) => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  };
+
+  const loadJSZip = async () => {
+    if (window.JSZip) {
+      return window.JSZip;
+    }
+
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+
+      script.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      script.async = true;
+
+      script.onload = resolve;
+      script.onerror = () =>
+        reject(new Error("No se pudo cargar el motor ZIP."));
+
+      document.head.appendChild(script);
+    });
+
+    if (!window.JSZip) {
+      throw new Error("JSZip no está disponible.");
+    }
+
+    return window.JSZip;
+  };
+
+  const processFactoryTask = async (prompt, index) => {
+    const workflow = parseWorkflow(prompt);
+
+    const response = await fetch(`${API_BASE}/api/factory`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        workflow,
+        factoryMode,
+        imagen_base64: factoryImage,
+        itemIndex: index
+      })
+    });
+
+    return readJsonResponse(response);
+  };
+
   const handleBatchGeneration = async () => {
-    const promptList = batchInput.split('\n').filter(p => p.trim() !== '');
-    if (promptList.length === 0) return alert("Pega tus instrucciones primero.");
+    let promptList = [];
 
-    if (!keys.modalWebhook) {
-      return alert("¡No has configurado tu Webhook de Modal Serverless en la Bóveda!");
+    try {
+      const parsedInput = JSON.parse(batchInput);
+
+      if (Array.isArray(parsedInput)) {
+        promptList = parsedInput
+          .map((item) => {
+            if (typeof item === "object" && item !== null) {
+              return JSON.stringify(item);
+            }
+            return String(item);
+          })
+          .filter(Boolean);
+      } else if (
+        typeof parsedInput === "object" &&
+        parsedInput !== null
+      ) {
+        promptList = [JSON.stringify(parsedInput)];
+      } else {
+        promptList = [String(parsedInput)];
+      }
+    } catch {
+      promptList = batchInput
+        .split("\n")
+        .map((prompt) => prompt.trim())
+        .filter(Boolean);
+    }
+
+    if (promptList.length === 0) {
+      alert("Pega tus instrucciones primero.");
+      return;
     }
 
     setIsBatching(true);
     setZipUrl(null);
+    setBatchTotal(promptList.length);
+    setBatchProgress(0);
 
-    // 🔥 MODO 1: ORQUESTACIÓN EN NUBE VPS (APAGA TU CELULAR AL INSTANTE)
-    if (factoryEngineMode === 'vps') {
-      if (!keys.vpsUrl) {
-        setIsBatching(false);
-        return alert("⚠️ Para procesar en segundo plano necesitas poner la URL de tu Servidor VPS en la Bóveda.");
-      }
+    try {
+      if (factoryEngineMode === "vps") {
+        setBatchStatus(
+          "☁️ Enviando lote a Cloudflare para procesamiento en segundo plano..."
+        );
 
-      setBatchStatus("🚀 Transmitiendo lote de instrucciones a tu Servidor VPS...");
-
-      try {
-        const response = await fetch(`${keys.vpsUrl}/api/orchestrate-factory`, {
+        const response = await fetch(`${API_BASE}/api/factory`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json"
+          },
           body: JSON.stringify({
+            mode: "batch",
             promptList,
-            modalWebhook: keys.modalWebhook,
             factoryMode,
-            factoryImage
+            imagen_base64: factoryImage
           })
         });
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Fallo en la comunicación con el VPS.");
+        const data = await readJsonResponse(response);
 
-        setBatchStatus(`✅ ¡ÉXITO! ${data.mensaje || "El VPS tomó el control de la producción. ¡Ya puedes cerrar tu app!"}`);
-      } catch (err) {
-        setBatchStatus(`❌ Error con el VPS: ${err.message}`);
-      } finally {
-        setIsBatching(false);
-      }
-      return;
-    }
+        setBatchProgress(promptList.length);
+        setBatchStatus(
+          `✅ ${
+            data.message ||
+            data.mensaje ||
+            "El lote fue recibido por Cloudflare."
+          }`
+        );
 
-    // 🔥 MODO 2: PROCESAMIENTO EN CELULAR (SE MANTIENE LA PANTALLA ABIERTA)
-    setBatchTotal(promptList.length);
-    setBatchProgress(0);
-    setBatchStatus(`Conectando con Modal Serverless desde celular [${factoryMode.toUpperCase()}]...`);
-    
-    const erroresLote = [];
-    let reporteModal = `=== REPORTE DE TAREAS (${factoryMode.toUpperCase()}) ===\n\n`;
-
-    try {
-      if (!window.JSZip) {
-        setBatchStatus("Cargando Motor ZIP...");
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-          script.onload = resolve;
-          script.onerror = () => reject(new Error("Navegador bloqueó el Motor ZIP."));
-          document.head.appendChild(script);
-        });
+        addLog("[OK] Lote enviado al Worker.");
+        return;
       }
 
-      const zip = new window.JSZip();
+      setBatchStatus(
+        `📱 Procesando mediante Cloudflare [${factoryMode.toUpperCase()}]...`
+      );
 
-      for (let i = 0; i < promptList.length; i++) {
-        const prompt = promptList[i];
-        setBatchStatus(`Procesando tarea en celular [${factoryMode.toUpperCase()}] ${i + 1} de ${promptList.length}...`);
+      const JSZip = await loadJSZip();
+      const zip = new JSZip();
+      const errors = [];
+      let report = `=== REPORTE DE TAREAS (${factoryMode.toUpperCase()}) ===\n\n`;
 
-        let intentos = 0;
-        let ultimoError = "";
-        let exito = false;
-        
-        while (intentos < 3 && !exito) {
+      for (let index = 0; index < promptList.length; index += 1) {
+        const prompt = promptList[index];
+        const taskNumber = index + 1;
+
+        setBatchStatus(
+          `Procesando tarea ${taskNumber} de ${promptList.length}...`
+        );
+
+        let success = false;
+        let lastError = "";
+
+        for (let attempt = 1; attempt <= 3 && !success; attempt += 1) {
           try {
-            let workflowParaModal = prompt;
-            try { workflowParaModal = JSON.parse(prompt); } catch (e) { /* Era solo texto */ }
+            const result = await processFactoryTask(prompt, index);
 
-            const response = await fetch(keys.modalWebhook, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                workflow: workflowParaModal,
-                imagen_base64: factoryImage
-              })
-            });
-            
-            if (!response.ok) throw new Error("Fallo de conexión HTTP con Modal");
-            const respuestaWebhook = await response.json();
-            
-            if (respuestaWebhook.archivo_base64) {
-              const ext = respuestaWebhook.extension || 'png';
-              zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.${ext}`, respuestaWebhook.archivo_base64, { base64: true });
-              respuestaWebhook.archivo_base64 = `✅ [ARCHIVO .${ext.toUpperCase()} EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`; 
-            } else if (respuestaWebhook.imagen_base64) { 
-              zip.folder("Resultados_Visuales").file(`Resultado_Modal_${i+1}.png`, respuestaWebhook.imagen_base64, { base64: true });
-              respuestaWebhook.imagen_base64 = `✅ [ARCHIVO .PNG EXTRAÍDO Y GUARDADO EN CARPETA RESULTADOS_VISUALES]`;
+            // 🔥 VALIDACIÓN CRÍTICA CONTRA RESPUESTAS CORRUPTAS 🔥
+            if (!result || typeof result !== "object") {
+              throw new Error("La fábrica devolvió una respuesta inválida.");
             }
 
-            reporteModal += `Tarea ${i+1}:\nOrden: ${prompt.substring(0,60)}...\nRespuesta Modal: ${JSON.stringify(respuestaWebhook)}\n\n`;
-            exito = true;
-            
-          } catch (err) {
-            ultimoError = err.message || "Error desconocido";
-            intentos++;
-            if (intentos >= 3) break;
-            setBatchStatus(`🔄 Reintentando en Modal (${intentos}/3)...`);
-            await new Promise(r => setTimeout(r, 4000));
+            const responseForReport = { ...result };
+
+            if (result.archivo_base64) {
+              const extension = result.extension || "png";
+
+              zip
+                .folder("Resultados_Visuales")
+                .file(
+                  `Resultado_${taskNumber}.${extension}`,
+                  result.archivo_base64,
+                  { base64: true }
+                );
+
+              responseForReport.archivo_base64 =
+                `✅ Archivo .${extension.toUpperCase()} guardado en el ZIP.`;
+            } else if (result.imagen_base64) {
+              zip
+                .folder("Resultados_Visuales")
+                .file(
+                  `Resultado_${taskNumber}.png`,
+                  result.imagen_base64,
+                  { base64: true }
+                );
+
+              responseForReport.imagen_base64 =
+                "✅ Imagen PNG guardada en el ZIP.";
+            }
+
+            report +=
+              `Tarea ${taskNumber}:\n` +
+              `Orden: ${String(prompt).slice(0, 120)}\n` +
+              `Respuesta: ${JSON.stringify(responseForReport)}\n\n`;
+
+            success = true;
+          } catch (error) {
+            lastError = error.message || "Error desconocido";
+
+            if (attempt < 3) {
+              setBatchStatus(
+                `🔄 Reintentando tarea ${taskNumber} (${attempt}/3)...`
+              );
+
+              await new Promise((resolve) => {
+                setTimeout(resolve, 3000);
+              });
+            }
           }
         }
 
-        if (!exito) {
-          console.warn(`Fallo en item ${i+1}: ${ultimoError}`);
-          erroresLote.push(`Item ${i+1}: ${ultimoError}`);
-          zip.folder("Errores").file(`ERROR_${i+1}.txt`, `Fallo al procesar en Modal.\nDatos: ${prompt}\nError: ${ultimoError}`);
-        }
-        
-        setBatchProgress(i + 1);
+        if (!success) {
+          errors.push(`Tarea ${taskNumber}: ${lastError}`);
 
-        if (i < promptList.length - 1) {
-          await new Promise(r => setTimeout(r, 3000));
+          zip
+            .folder("Errores")
+            .file(
+              `ERROR_${taskNumber}.txt`,
+              `Error procesando la tarea.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`
+            );
+        }
+
+        setBatchProgress(taskNumber);
+
+        if (index < promptList.length - 1) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1000);
+          });
         }
       }
 
-      setBatchStatus("Empaquetando resultados...");
-      
-      zip.file("Reporte_Modal_Serverless.txt", reporteModal);
+      zip.file("Reporte_Cloudflare.txt", report);
 
+      setBatchStatus("📦 Empaquetando resultados...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(zipBlob);
-      setZipUrl(url);
+      const generatedUrl = URL.createObjectURL(zipBlob);
 
-      if (erroresLote.length > 0) {
-        setBatchStatus(`⚠️ Finalizó con ${erroresLote.length} errores. Revisa los .txt en el ZIP.`);
+      setZipUrl(generatedUrl);
+
+      if (errors.length > 0) {
+        setBatchStatus(
+          `⚠️ Lote finalizado con ${errors.length} error(es). Revisa el ZIP.`
+        );
       } else {
-        setBatchStatus("✅ ¡Lote 100% Procesado con éxito! Descarga tu ZIP.");
+        setBatchStatus("✅ Lote procesado correctamente.");
       }
 
+      addLog("[OK] Lote local empaquetado.");
     } catch (error) {
-      setBatchStatus(`❌ Error Crítico: ${error.message}`);
+      console.error(error);
+      setBatchStatus(`❌ Error de fábrica: ${error.message}`);
+      addLog(`[ERROR] Fábrica: ${error.message}`);
     } finally {
       setIsBatching(false);
     }
   };
 
   const handleRenderProcess = async () => {
-    if (videoFiles.length === 0) return alert("Sube imágenes al Estudio primero.");
+    if (videoFiles.length === 0) {
+      alert("Sube imágenes al Estudio primero.");
+      return;
+    }
+
     setIsRendering(true);
     setVideoResult(null);
     setFfmpegLog("");
 
     try {
-      if (engineMode === 'local') {
+      if (engineMode === "local") {
         const url = await renderVideo({
           videoFiles,
           audioFile,
@@ -322,388 +602,983 @@ export default function AppUI() {
           fontSize,
           textColor,
           videoFormat,
-          onLog: (msg) => setFfmpegLog(prev => `${prev}\n${msg}`)
+          onLog: (message) => {
+            setFfmpegLog((previous) => `${previous}\n${message}`);
+          }
         });
+
         setVideoResult(url);
-      } 
-      else {
-        if (!keys.vpsUrl) return alert("¡No has configurado la URL de tu Servidor VPS en la Bóveda!");
-        setFfmpegLog("[INFO] 🌐 Empaquetando activos visuales para el servidor VPS...");
-        
-        const base64Videos = await Promise.all(videoFiles.map(f => fileToBase64(f.file)));
-        let audioBase64 = null;
-        if (audioFile) audioBase64 = await fileToBase64(audioFile);
-
-        const payload = {
-          batchId: `lote_tupia_${Date.now()}`,
-          videoFiles: base64Videos,
-          audioUrl: audioBase64, 
-          directorPlan,
-          fontSize,
-          textColor,
-          videoFormat
-        };
-
-        setFfmpegLog(`[INFO] 🚀 Transmitiendo datos a tu VPS Ubuntu (${keys.vpsUrl})...`);
-        const response = await fetch(`${keys.vpsUrl}/api/webhook/render-batch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || data.detalle || "Fallo en el Servidor VPS");
-
-        setVideoResult(data.downloadUrl);
-        setFfmpegLog(`[INFO] ✅ ¡El Servidor VPS completó el render en tiempo récord!`);
+        return;
       }
+
+      setFfmpegLog(
+        "[INFO] 🌐 Preparando archivos para Cloudflare y VPS..."
+      );
+
+      const base64Videos = await Promise.all(
+        videoFiles.map(({ file }) => fileToBase64(file))
+      );
+
+      const audioBase64 = audioFile
+        ? await fileToBase64(audioFile)
+        : null;
+
+      const payload = {
+        batchId: `lote_tupia_${Date.now()}`,
+        videoFiles: base64Videos,
+        audioUrl: audioBase64,
+        directorPlan,
+        fontSize: Number(fontSize),
+        textColor,
+        videoFormat
+      };
+
+      setFfmpegLog(
+        "[INFO] 🚀 Enviando render al Worker de Cloudflare..."
+      );
+
+      const response = await fetch(`${API_BASE}/api/render`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await readJsonResponse(response);
+      const resultUrl =
+        data.downloadUrl ||
+        data.url ||
+        data.videoUrl ||
+        data.resultUrl;
+
+      if (!resultUrl) {
+        throw new Error(
+          "El servidor respondió correctamente, pero no devolvió una URL de descarga."
+        );
+      }
+
+      setVideoResult(resultUrl);
+      setFfmpegLog(
+        "[INFO] ✅ El render fue completado correctamente."
+      );
     } catch (error) {
       console.error(error);
-      setFfmpegLog(prev => `${prev}\n❌ ERROR: ${error?.message || error}`);
+
+      setFfmpegLog(
+        (previous) =>
+          `${previous}\n❌ ERROR: ${error?.message || "Error desconocido"}`
+      );
     } finally {
       setIsRendering(false);
     }
   };
 
-  const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
-
-    const currentKey = keys[activeModel];
-    if (!currentKey) { alert(`⚠️ Falta tu API Key para ${activeModel.toUpperCase()}!`); setActiveTab('settings'); return; }
-
-    let finalInput = input;
-    const textFiles = attachments.filter(a => a.type === 'text');
-    if (textFiles.length > 0) {
-      finalInput += "\n\n" + textFiles.map(a => `--- ARCHIVO: ${a.name} ---\n${a.data}\n--- FIN DE ARCHIVO ---`).join('\n\n');
+    if (
+      (!input.trim() && attachments.length === 0) ||
+      isLoading
+    ) {
+      return;
     }
-    const images = attachments.filter(a => a.type === 'image');
 
-    const displayUserText = input + (attachments.length > 0 ? `\n[+ ${attachments.length} archivos]` : '');
-    const newMessages = [...activeChat.messages, { role: 'user', content: displayUserText, rawContent: finalInput }];
-    
-    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: newMessages } : chat));
-    setInput(""); setIsLoading(true); setAttachments([]);
-    addLog(`Consultando a ${activePersona.toUpperCase()} via ${activeModel}...`);
+    let finalInput = input.trim();
+
+    const textFiles = attachments.filter(
+      (attachment) => attachment.type === "text"
+    );
+
+    if (textFiles.length > 0) {
+      finalInput +=
+        "\n\n" +
+        textFiles
+          .map(
+            (file) =>
+              `--- ARCHIVO: ${file.name} ---\n` +
+              `${file.data}\n` +
+              `--- FIN DE ARCHIVO ---`
+          )
+          .join("\n\n");
+    }
+
+    const images = attachments.filter(
+      (attachment) => attachment.type === "image"
+    );
+
+    const displayUserText =
+      input.trim() +
+      (attachments.length > 0
+        ? `\n[+ ${attachments.length} archivo(s) adjunto(s)]`
+        : "");
+
+    const userMessage = {
+      role: "user",
+      content: displayUserText,
+      rawContent: finalInput
+    };
+
+    const newMessages = [
+      ...activeChat.messages,
+      userMessage
+    ];
+
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id === currentChatId
+          ? {
+              ...chat,
+              title:
+                chat.messages.length === 0
+                  ? (input.trim() || "Chat con archivo").slice(0, 40)
+                  : chat.title,
+              messages: newMessages
+            }
+          : chat
+      )
+    );
+
+    setInput("");
+    setAttachments([]);
+    setIsLoading(true);
+
+    addLog(
+      `Consultando ${activePersona.toUpperCase()} mediante Cloudflare...`
+    );
 
     try {
-      const history = newMessages.slice(-5).map(m => ({ role: m.role, content: m.rawContent || m.content }));
-      
-      const { uiReply, directorPlan: planExtraido } = await procesarConsultaIA({
-        activeModel, specificModel, activePersona, finalInput, history, images, currentKey
+      const history = newMessages
+        .slice(-5)
+        .map((message) => ({
+          role: message.role,
+          content: message.rawContent || message.content
+        }));
+
+      const result = await procesarConsultaIA({
+        activeModel,
+        specificModel,
+        activePersona,
+        finalInput,
+        history,
+        images
       });
 
-      if (planExtraido) setDirectorPlan(planExtraido);
+      const uiReply =
+        result?.uiReply ||
+        result?.reply ||
+        result?.content ||
+        "El Worker no devolvió contenido.";
 
-      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: uiReply }] } : chat));
+      const planExtraido = result?.directorPlan || null;
+
+      if (planExtraido) {
+        setDirectorPlan(planExtraido);
+      }
+
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: [
+                  ...newMessages,
+                  {
+                    role: "assistant",
+                    content: uiReply
+                  }
+                ]
+              }
+            : chat
+        )
+      );
+
+      addLog("[OK] Respuesta recibida del Worker.");
     } catch (error) {
-      setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...newMessages, { role: 'assistant', content: `❌ Error: ${error.message}` }] } : chat));
-    } finally { setIsLoading(false); }
+      const errorMessage = `❌ Error: ${
+        error?.message || "No se pudo procesar la consulta."
+      }`;
+
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: [
+                  ...newMessages,
+                  {
+                    role: "assistant",
+                    content: errorMessage
+                  }
+                ]
+              }
+            : chat
+        )
+      );
+
+      addLog(`[ERROR] IA: ${error?.message || "Error desconocido"}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const renderMessageContent = (text) => {
-    if (typeof text !== 'string') return <p>Archivo procesado.</p>;
+    if (typeof text !== "string") {
+      return <p>Archivo procesado.</p>;
+    }
+
     const parts = text.split(/(```[\s\S]*?```)/g);
+
     return parts.map((part, index) => {
-      if (part.startsWith('```') && part.endsWith('```')) {
-        const match = part.match(/```(\w*)\n([\s\S]*?)```/);
-        return match ? <CodeBlock key={index} lang={match[1]} code={match[2]} /> : <CodeBlock key={index} lang="txt" code={part.slice(3, -3)} />;
+      if (
+        part.startsWith("```") &&
+        part.endsWith("```")
+      ) {
+        const match = part.match(
+          /```([^\n]*)\n([\s\S]*?)```/
+        );
+
+        if (match) {
+          return (
+            <CodeBlock
+              key={index}
+              lang={match[1] || "txt"}
+              code={match[2]}
+            />
+          );
+        }
+
+        return (
+          <CodeBlock
+            key={index}
+            lang="txt"
+            code={part.slice(3, -3)}
+          />
+        );
       }
-      return <p key={index} className="whitespace-pre-wrap leading-relaxed">{part}</p>;
+
+      if (!part) {
+        return null;
+      }
+
+      return (
+        <p
+          key={index}
+          className="whitespace-pre-wrap leading-relaxed"
+        >
+          {part}
+        </p>
+      );
     });
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden">
-      <header className="p-3 bg-gray-900 border-b border-gray-800 flex justify-between items-center z-10 shrink-0">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-black font-sans text-white">
+      <header className="z-10 flex shrink-0 items-center justify-between border-b border-gray-800 bg-gray-900 p-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => setIsSidebarOpen(true)} className="text-2xl text-gray-300 hover:text-white px-2 rounded hover:bg-gray-800 transition">☰</button>
-          <h1 className="font-bold text-lg tracking-tight text-blue-400">Tupia Workspace</h1>
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="rounded px-2 text-2xl text-gray-300 transition hover:bg-gray-800 hover:text-white"
+          >
+            ☰
+          </button>
+
+          <h1 className="text-lg font-bold tracking-tight text-blue-400">
+            Tupia Workspace
+          </h1>
         </div>
-        <button onClick={createNewChat} className="bg-blue-600/30 text-blue-400 border border-blue-800/50 px-3 py-1 rounded-full text-xs font-bold hover:bg-blue-600 hover:text-white transition-colors">➕ Nuevo</button>
+
+        <button
+          type="button"
+          onClick={createNewChat}
+          className="rounded-full border border-blue-800/50 bg-blue-600/30 px-3 py-1 text-xs font-bold text-blue-400 transition-colors hover:bg-blue-600 hover:text-white"
+        >
+          ➕ Nuevo
+        </button>
       </header>
 
       {isSidebarOpen && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex animate-in fade-in duration-200">
-          <div className="w-4/5 max-w-sm bg-gray-950 h-full border-r border-gray-800 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
-            <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900">
-              <h2 className="font-bold text-lg text-white">Tus Chats</h2>
-              <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white text-3xl">&times;</button>
+        <div className="fixed inset-0 z-50 flex bg-black/80">
+          <div className="flex h-full w-4/5 max-w-sm flex-col border-r border-gray-800 bg-gray-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-800 bg-gray-900 p-4">
+              <h2 className="text-lg font-bold text-white">
+                Tus Chats
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen(false)}
+                className="text-3xl text-gray-400 hover:text-white"
+              >
+                &times;
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {chats.map(chat => (
-                <div key={chat.id} onClick={() => { setCurrentChatId(chat.id); setIsSidebarOpen(false); }} className={`p-3 rounded-lg flex justify-between items-center cursor-pointer transition-all ${chat.id === currentChatId ? 'bg-blue-900/40 border border-blue-500/50 text-blue-300' : 'hover:bg-gray-900 text-gray-400'}`}>
-                  <span className="truncate flex-1 text-sm font-medium">{chat.title}</span>
-                  <button onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }} className="text-gray-600 hover:text-red-400 ml-2 p-1">🗑️</button>
+
+            <div className="flex-1 space-y-1 overflow-y-auto p-2">
+              {chats.map((chat) => (
+                <div
+                  key={chat.id}
+                  onClick={() => {
+                    setCurrentChatId(chat.id);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`flex cursor-pointer items-center justify-between rounded-lg p-3 transition-all ${
+                    chat.id === currentChatId
+                      ? "border border-blue-500/50 bg-blue-900/40 text-blue-300"
+                      : "text-gray-400 hover:bg-gray-900"
+                  }`}
+                >
+                  <span className="flex-1 truncate text-sm font-medium">
+                    {chat.title}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                    className="ml-2 p-1 text-gray-600 hover:text-red-400"
+                  >
+                    🗑️
+                  </button>
                 </div>
               ))}
             </div>
           </div>
-          <div className="flex-1" onClick={() => setIsSidebarOpen(false)}></div>
+
+          <div
+            className="flex-1"
+            onClick={() => setIsSidebarOpen(false)}
+          />
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto pb-48 relative">
-        {activeTab === 'chat' && (
-          <div className="p-4 space-y-4">
+      <main className="relative flex-1 overflow-y-auto pb-48">
+        {activeTab === "chat" && (
+          <div className="space-y-4 p-4">
             {activeChat.messages.length === 0 && (
-              <div className="text-center text-gray-500 mt-10 bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                <span className="text-5xl block mb-4">🧩</span>
-                <p className="font-bold text-gray-300">El Método PTB + Editor</p>
-                <p className="text-sm mt-2">Usa Plan 🗺️ ➔ Think 🤔 ➔ Build 🏗️ o cambia al Director de Cine 🎬</p>
+              <div className="mt-10 rounded-2xl border border-gray-800 bg-gray-900 p-6 text-center text-gray-500">
+                <span className="mb-4 block text-5xl">🧩</span>
+
+                <p className="font-bold text-gray-300">
+                  El Método PTB + Editor
+                </p>
+
+                <p className="mt-2 text-sm">
+                  Usa Plan 🗺️ ➔ Think 🤔 ➔ Build 🏗️
+                  <br />
+                  o cambia al Director de Cine 🎬
+                </p>
+
+                <p className="mt-4 text-xs text-cyan-400">
+                  Conectado mediante Cloudflare Worker
+                </p>
               </div>
             )}
-            {activeChat.messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[90%] p-4 rounded-2xl text-sm shadow-md ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-gray-900 text-gray-100 border border-gray-700 rounded-bl-sm w-full'}`}>
-                  {msg.role === 'assistant' && (
-                    <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-700/50">
-                      <span className="text-xs font-bold text-gray-500 flex items-center gap-1">🤖 Tupia AI</span>
-                      <button onClick={() => navigator.clipboard.writeText(msg.content)} className="text-[10px] uppercase font-bold tracking-wider flex items-center gap-1 text-gray-400 hover:text-white bg-gray-800 px-2 py-1 rounded transition-colors">📋 Copiar Todo</button>
+
+            {activeChat.messages.map((message, index) => (
+              <div
+                key={`${currentChatId}-${index}`}
+                className={`flex ${
+                  message.role === "user"
+                    ? "justify-end"
+                    : "justify-start"
+                }`}
+              >
+                <div
+                  className={`max-w-[90%] rounded-2xl p-4 text-sm shadow-md ${
+                    message.role === "user"
+                      ? "rounded-br-sm bg-blue-600 text-white"
+                      : "w-full rounded-bl-sm border border-gray-700 bg-gray-900 text-gray-100"
+                  }`}
+                >
+                  {message.role === "assistant" && (
+                    <div className="mb-3 flex items-center justify-between border-b border-gray-700/50 pb-2">
+                      <span className="flex items-center gap-1 text-xs font-bold text-gray-500">
+                        🤖 Tupia AI
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            message.content
+                          )
+                        }
+                        className="rounded bg-gray-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 transition-colors hover:text-white"
+                      >
+                        📋 Copiar Todo
+                      </button>
                     </div>
                   )}
-                  {msg.role === 'user' ? <p className="whitespace-pre-wrap">{msg.content}</p> : renderMessageContent(msg.content)}
+
+                  {message.role === "user" ? (
+                    <p className="whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                  ) : (
+                    renderMessageContent(message.content)
+                  )}
                 </div>
               </div>
             ))}
-            {isLoading && <div className="p-3 bg-gray-800 animate-pulse text-sm w-1/2 rounded-xl">Pensando...</div>}
+
+            {isLoading && (
+              <div className="w-1/2 animate-pulse rounded-xl bg-gray-800 p-3 text-sm">
+                Pensando mediante Cloudflare...
+              </div>
+            )}
+
             <div ref={chatBottomRef} />
           </div>
         )}
 
-        {/* TAB FÁBRICA HÍBRIDA (CON SELECTOR DE MOTOR EN NUBE O CELULAR) */}
-        {activeTab === 'factory' && (
-          <div className="p-6 space-y-6">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 text-cyan-400 flex items-center justify-between">
-              <span>🏭 Súper Fábrica Serverless</span>
-              <select value={factoryEngineMode} onChange={(e) => setFactoryEngineMode(e.target.value)} className="bg-gray-900 text-xs text-white border border-gray-700 rounded-lg p-1 font-normal">
-                <option value="vps">☁️ Enviar a VPS 24/7 (Apagar Celular)</option>
-                <option value="celular">📱 Procesar en Celular (Abierto)</option>
+        {activeTab === "factory" && (
+          <div className="space-y-6 p-6">
+            <h2 className="flex items-center justify-between border-b border-gray-800 pb-2 text-xl font-bold text-cyan-400">
+              <span>🏭 Súper Fábrica</span>
+
+              <select
+                value={factoryEngineMode}
+                onChange={(event) =>
+                  setFactoryEngineMode(event.target.value)
+                }
+                className="rounded-lg border border-gray-700 bg-gray-900 p-1 text-xs font-normal text-white"
+              >
+                <option value="vps">
+                  ☁️ Cloudflare / VPS 24/7
+                </option>
+
+                <option value="celular">
+                  📱 Procesar lote desde celular
+                </option>
               </select>
             </h2>
 
-            <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4 shadow-lg shadow-black">
-              <button 
-                onClick={() => setFactoryMode('image')} 
-                className={`flex-1 text-xs font-bold py-3 rounded-lg transition-colors ${factoryMode === 'image' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30' : 'text-gray-500 hover:text-white'}`}>
-                📸 Webhooks Imagen
+            <div className="flex rounded-xl border border-gray-800 bg-gray-950 p-1 shadow-lg">
+              <button
+                type="button"
+                onClick={() => setFactoryMode("image")}
+                className={`flex-1 rounded-lg py-3 text-xs font-bold transition-colors ${
+                  factoryMode === "image"
+                    ? "bg-cyan-600 text-white"
+                    : "text-gray-500 hover:text-white"
+                }`}
+              >
+                📸 Imagen
               </button>
-              <button 
-                onClick={() => setFactoryMode('video')} 
-                className={`flex-1 text-xs font-bold py-3 rounded-lg transition-colors ${factoryMode === 'video' ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30' : 'text-gray-500 hover:text-white'}`}>
-                🎥 Webhooks Video
+
+              <button
+                type="button"
+                onClick={() => setFactoryMode("video")}
+                className={`flex-1 rounded-lg py-3 text-xs font-bold transition-colors ${
+                  factoryMode === "video"
+                    ? "bg-purple-600 text-white"
+                    : "text-gray-500 hover:text-white"
+                }`}
+              >
+                🎥 Video
               </button>
             </div>
-            
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-800">
-              <label className="block text-sm font-bold text-gray-300 mb-2">
-                Pega tus Instrucciones o JSON para Modal Aquí
+
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+              <label className="mb-2 block text-sm font-bold text-gray-300">
+                Instrucciones o JSON para la fábrica
               </label>
-              <textarea 
-                value={batchInput} 
-                onChange={(e) => setBatchInput(e.target.value)}
-                className={`w-full bg-black border border-gray-700 rounded-lg p-3 text-sm font-mono h-64 outline-none resize-none focus:border-${factoryMode === 'image' ? 'cyan' : 'purple'}-500 ${factoryMode === 'image' ? 'text-cyan-400' : 'text-purple-400'}`}
-                placeholder={"Ejemplo de JSON ComfyUI:\n{\n  \"3\": {\n    \"class_type\": \"KSampler\",\n    ...\n  }\n}"}
+
+              <textarea
+                value={batchInput}
+                onChange={(event) =>
+                  setBatchInput(event.target.value)
+                }
+                className={`h-64 w-full resize-none rounded-lg border border-gray-700 bg-black p-3 font-mono text-sm outline-none ${
+                  factoryMode === "image"
+                    ? "text-cyan-400 focus:border-cyan-500"
+                    : "text-purple-400 focus:border-purple-500"
+                }`}
+                placeholder={`Ejemplo de JSON ComfyUI:
+{
+  "3": {
+    "class_type": "KSampler"
+  }
+}
+
+También puedes escribir una instrucción de texto por línea.`}
               />
-              
-              <div className="mt-4 flex items-center gap-3">
-                <input type="file" id="factoryImg" className="hidden" accept="image/*" onChange={async (e) => {
-                    if(e.target.files[0]) {
-                        const b64 = await fileToBase64(e.target.files[0]);
-                        setFactoryImage(b64);
-                    }
-                }} />
-                <button onClick={() => document.getElementById('factoryImg').click()} className="bg-gray-800 text-xs px-4 py-2 rounded-lg text-gray-300 border border-gray-700 hover:text-white transition-colors">
-                    {factoryImage ? "✅ Imagen Cargada (Clic para cambiar)" : "📸 Adjuntar Imagen Inicial (Opcional)"}
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <input
+                  ref={factoryImageInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleFactoryImageChange}
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    factoryImageInputRef.current?.click()
+                  }
+                  className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-xs text-gray-300 transition-colors hover:text-white"
+                >
+                  {factoryImage
+                    ? "✅ Imagen cargada"
+                    : "📸 Adjuntar imagen opcional"}
                 </button>
-                {factoryImage && <button onClick={() => setFactoryImage(null)} className="text-red-400 text-xs font-bold">X Quitar</button>}
+
+                {factoryImage && (
+                  <button
+                    type="button"
+                    onClick={() => setFactoryImage(null)}
+                    className="text-xs font-bold text-red-400"
+                  >
+                    Quitar
+                  </button>
+                )}
               </div>
 
-              <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
-                <span>{factoryEngineMode === 'vps' ? '☁️ Modo Nube Activo: El VPS tomará el control. Podrás cerrar tu celular apenas envíes la orden.' : '📱 Modo Celular: Tu pantalla deberá permanecer encendida hasta que termine el lote.'}</span>
+              <p className="mt-3 text-xs text-gray-400">
+                {factoryEngineMode === "vps"
+                  ? "☁️ El lote se envía al Worker. Cloudflare decide si usa Queue, Modal o VPS."
+                  : "📱 El navegador permanece abierto, pero cada solicitud pasa por Cloudflare."}
               </p>
             </div>
 
-            {isBatching ? (
-              <div className="bg-gray-950 p-4 rounded-xl border border-cyan-800/50 text-center">
-                <p className="text-sm font-bold text-cyan-400 mb-2">{batchStatus}</p>
-                {factoryEngineMode === 'celular' && (
+            {isBatching && (
+              <div className="rounded-xl border border-cyan-800/50 bg-gray-950 p-4 text-center">
+                <p className="mb-2 text-sm font-bold text-cyan-400">
+                  {batchStatus}
+                </p>
+
+                {factoryEngineMode === "celular" && (
                   <>
-                    <div className="w-full bg-gray-800 rounded-full h-4 mb-2 overflow-hidden">
-                      <div className={`h-4 transition-all duration-300 ${factoryMode === 'image' ? 'bg-cyan-500' : 'bg-purple-500'}`} style={{ width: `${(batchProgress / batchTotal) * 100}%` }}></div>
+                    <div className="mb-2 h-4 w-full overflow-hidden rounded-full bg-gray-800">
+                      <div
+                        className={`h-4 transition-all duration-300 ${
+                          factoryMode === "image"
+                            ? "bg-cyan-500"
+                            : "bg-purple-500"
+                        }`}
+                        style={{
+                          width:
+                            batchTotal > 0
+                              ? `${(batchProgress / batchTotal) * 100}%`
+                              : "0%"
+                        }}
+                      />
                     </div>
-                    <p className="text-xs text-gray-500">{batchProgress} de {batchTotal} tareas completadas</p>
+
+                    <p className="text-xs text-gray-500">
+                      {batchProgress} de {batchTotal} tareas
+                    </p>
                   </>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <button onClick={handleBatchGeneration} className={`w-full font-bold py-4 rounded-xl shadow-lg transition-all text-white ${factoryMode === 'image' ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500' : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'}`}>
-                  {factoryEngineMode === 'vps' ? '🚀 Disparar Producción a Nube VPS' : '🚀 Disparar Tareas en Celular'}
-                </button>
-                
-                {batchStatus.includes('❌') && (
-                  <div className="bg-red-900/30 p-4 rounded-xl border border-red-500/50 text-center animate-in fade-in zoom-in duration-300">
-                    <p className="text-sm font-bold text-red-400">{batchStatus}</p>
-                  </div>
-                )}
-                
-                {batchStatus.includes('✅') && !zipUrl && (
-                  <div className="bg-green-900/30 p-4 rounded-xl border border-green-500/50 text-center animate-in fade-in zoom-in duration-300">
-                    <p className="text-sm font-bold text-green-400">{batchStatus}</p>
-                  </div>
                 )}
               </div>
             )}
 
+            {!isBatching && (
+              <button
+                type="button"
+                onClick={handleBatchGeneration}
+                className={`w-full rounded-xl bg-gradient-to-r py-4 font-bold text-white shadow-lg transition-all ${
+                  factoryMode === "image"
+                    ? "from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
+                    : "from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
+                }`}
+              >
+                {factoryEngineMode === "vps"
+                  ? "🚀 Enviar lote a Cloudflare"
+                  : "🚀 Procesar lote desde celular"}
+              </button>
+            )}
+
+            {!isBatching && batchStatus !== "Esperando instrucciones..." && (
+              <div
+                className={`rounded-xl border p-4 text-center text-sm ${
+                  batchStatus.startsWith("❌")
+                    ? "border-red-500/50 bg-red-900/30 text-red-400"
+                    : batchStatus.startsWith("⚠️")
+                    ? "border-yellow-500/50 bg-yellow-900/30 text-yellow-400"
+                    : "border-green-500/50 bg-green-900/30 text-green-400"
+                }`}
+              >
+                {batchStatus}
+              </div>
+            )}
+
             {zipUrl && (
-              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-green-500 shadow-2xl shadow-green-500/20 text-center animate-in fade-in zoom-in duration-300">
-                <h3 className="text-base font-bold text-green-400 mb-3">✅ ¡ZIP Generado Exitosamente!</h3>
-                <p className="text-xs text-gray-400 mb-4">Adentro encontrarás tu resultado final listo y el reporte completo de las tareas.</p>
-                <a href={zipUrl} download={`Resultados_${factoryMode.toUpperCase()}_Lote_${Date.now()}.zip`} className="w-full block text-center bg-green-600 py-4 rounded-xl font-bold hover:bg-green-500 transition-colors text-white shadow-lg shadow-green-600/30">
-                  📥 DESCARGAR ZIP
+              <div className="rounded-xl border border-green-500 bg-gray-900 p-4 text-center shadow-2xl shadow-green-500/20">
+                <h3 className="mb-3 text-base font-bold text-green-400">
+                  ✅ ZIP generado
+                </h3>
+
+                <p className="mb-4 text-xs text-gray-400">
+                  El ZIP contiene los resultados y el reporte de tareas.
+                </p>
+
+                <a
+                  href={zipUrl}
+                  download={`Resultados_${factoryMode}_${Date.now()}.zip`}
+                  className="block w-full rounded-xl bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500"
+                >
+                  📥 Descargar ZIP
                 </a>
               </div>
             )}
           </div>
         )}
 
-        {/* TAB ESTUDIO */}
-        {activeTab === 'studio' && (
-          <div className="p-6 space-y-6">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2 flex items-center justify-between text-red-400">
+        {activeTab === "studio" && (
+          <div className="space-y-6 p-6">
+            <h2 className="flex items-center justify-between border-b border-gray-800 pb-2 text-xl font-bold text-red-400">
               <span>🎬 Tupia Director</span>
-              <select value={engineMode} onChange={(e)=>setEngineMode(e.target.value)} className="bg-gray-900 text-xs text-white border border-gray-700 rounded-lg p-1">
-                <option value="local">⚙️ Procesar en Celular</option>
-                <option value="vps">🚀 Enviar al Servidor VPS</option>
+
+              <select
+                value={engineMode}
+                onChange={(event) =>
+                  setEngineMode(event.target.value)
+                }
+                className="rounded-lg border border-gray-700 bg-gray-900 p-1 text-xs text-white"
+              >
+                <option value="local">
+                  ⚙️ Procesar localmente
+                </option>
+
+                <option value="vps">
+                  ☁️ Enviar a Cloudflare / VPS
+                </option>
               </select>
             </h2>
-            
+
             {directorPlan && (
-              <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl">
-                <span className="font-bold text-blue-300 text-sm">🧠 Plan Director Activo: {directorPlan.length} escenas.</span>
-                <p className="text-xs text-gray-400 mt-1">Textos de IA listos para estampar. Ajusta la fuente abajo.</p>
+              <div className="rounded-xl border border-blue-500/50 bg-blue-900/30 p-4">
+                <span className="text-sm font-bold text-blue-300">
+                  🧠 Plan Director activo:{" "}
+                  {Array.isArray(directorPlan)
+                    ? directorPlan.length
+                    : Object.keys(directorPlan || {}).length}{" "}
+                  escenas
+                </span>
+
+                <p className="mt-1 text-xs text-gray-400">
+                  Los textos de la IA están listos para estamparse.
+                </p>
               </div>
             )}
 
-            <div className="flex bg-gray-950 rounded-xl border border-gray-800 p-1 mb-4">
-              <button onClick={() => setVideoFormat('horizontal')} className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'horizontal' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}>
-                🖥️ Horizontal (16:9)
+            <div className="flex rounded-xl border border-gray-800 bg-gray-950 p-1">
+              <button
+                type="button"
+                onClick={() => setVideoFormat("horizontal")}
+                className={`flex-1 rounded-lg py-2 text-xs font-bold ${
+                  videoFormat === "horizontal"
+                    ? "bg-red-600 text-white"
+                    : "text-gray-500 hover:text-white"
+                }`}
+              >
+                🖥️ Horizontal 16:9
               </button>
-              <button onClick={() => setVideoFormat('vertical')} className={`flex-1 text-xs font-bold py-2 rounded-lg transition-colors ${videoFormat === 'vertical' ? 'bg-red-600 text-white shadow-md' : 'text-gray-500 hover:text-white'}`}>
-                📱 Vertical (9:16)
+
+              <button
+                type="button"
+                onClick={() => setVideoFormat("vertical")}
+                className={`flex-1 rounded-lg py-2 text-xs font-bold ${
+                  videoFormat === "vertical"
+                    ? "bg-red-600 text-white"
+                    : "text-gray-500 hover:text-white"
+                }`}
+              >
+                📱 Vertical 9:16
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 bg-gray-950 p-4 rounded-xl border border-gray-800">
+            <div className="grid grid-cols-2 gap-4 rounded-xl border border-gray-800 bg-gray-950 p-4">
               <div>
-                <label className="text-xs text-gray-400 font-bold block mb-2">Tamaño del Texto ({fontSize}px)</label>
-                <input type="range" min="40" max="150" value={fontSize} onChange={(e) => setFontSize(e.target.value)} className="w-full accent-red-500" />
+                <label className="mb-2 block text-xs font-bold text-gray-400">
+                  Tamaño del texto ({fontSize}px)
+                </label>
+
+                <input
+                  type="range"
+                  min="40"
+                  max="150"
+                  value={fontSize}
+                  onChange={(event) =>
+                    setFontSize(Number(event.target.value))
+                  }
+                  className="w-full accent-red-500"
+                />
               </div>
+
               <div>
-                <label className="text-xs text-gray-400 font-bold block mb-2">Color del Texto</label>
-                <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="w-full h-8 rounded cursor-pointer border-none" />
+                <label className="mb-2 block text-xs font-bold text-gray-400">
+                  Color del texto
+                </label>
+
+                <input
+                  type="color"
+                  value={textColor}
+                  onChange={(event) =>
+                    setTextColor(event.target.value)
+                  }
+                  className="h-8 w-full cursor-pointer rounded border-none"
+                />
               </div>
             </div>
 
-            <div className="flex gap-4 w-full">
-              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-red-500/40" onClick={() => document.getElementById('studio-upload').click()}>
-                <span className="text-4xl mb-2">🎞️</span><span className="text-sm font-bold text-gray-300">Imágenes</span>
-                <input id="studio-upload" type="file" multiple className="hidden" accept="image/*" onChange={handleStudioMedia} />
-              </div>
-              <div className="flex-1 bg-gray-900 p-4 rounded-2xl border-2 border-dashed border-gray-800 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500/40" onClick={() => document.getElementById('audio-upload').click()}>
-                <span className="text-4xl mb-2">🎵</span><span className="text-sm font-bold text-gray-300">{audioFile ? "Pista Lista" : "Música Fondo"}</span>
-                <input id="audio-upload" type="file" className="hidden" accept="audio/*" onChange={(e) => setAudioFile(e.target.files[0])} />
-                {audioFile && (
-                  <button onClick={(e) => { e.stopPropagation(); setAudioFile(null); document.getElementById('audio-upload').value = ""; }} className="mt-2 text-[10px] bg-red-600/30 text-red-400 px-3 py-1 rounded-full hover:bg-red-600 hover:text-white">Quitar</button>
-                )}
-              </div>
+            <div className="flex w-full gap-4">
+              <button
+                type="button"
+                onClick={() => studioUploadRef.current?.click()}
+                className="flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-800 bg-gray-900 p-4 hover:border-red-500/40"
+              >
+                <span className="mb-2 text-4xl">🎞️</span>
+                <span className="text-sm font-bold text-gray-300">
+                  Imágenes
+                </span>
+              </button>
+
+              <input
+                ref={studioUploadRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept="image/*"
+                onChange={handleStudioMedia}
+              />
+
+              <button
+                type="button"
+                onClick={() => audioUploadRef.current?.click()}
+                className="flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-800 bg-gray-900 p-4 hover:border-blue-500/40"
+              >
+                <span className="mb-2 text-4xl">🎵</span>
+                <span className="text-sm font-bold text-gray-300">
+                  {audioFile ? "Pista lista" : "Música de fondo"}
+                </span>
+              </button>
+
+              <input
+                ref={audioUploadRef}
+                type="file"
+                className="hidden"
+                accept="audio/*"
+                onChange={(event) =>
+                  setAudioFile(event.target.files?.[0] || null)
+                }
+              />
             </div>
+
+            {audioFile && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAudioFile(null);
+
+                  if (audioUploadRef.current) {
+                    audioUploadRef.current.value = "";
+                  }
+                }}
+                className="text-xs font-bold text-red-400"
+              >
+                Quitar música: {audioFile.name}
+              </button>
+            )}
 
             {videoFiles.length > 0 && (
-              <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-xs font-bold text-gray-400 mb-2">Secuencia Visual ({videoFiles.length} clips):</p>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                  {videoFiles.map(f => (
-                    <div key={f.id} className="bg-gray-900 p-2 rounded-lg text-xs flex justify-between border border-gray-800">
-                      <span className="truncate flex-1 text-gray-300">{f.name}</span>
-                      <button onClick={() => setVideoFiles(prev => prev.filter(item => item.id !== f.id))} className="text-red-500 ml-2">X</button>
+              <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
+                <p className="mb-2 text-xs font-bold text-gray-400">
+                  Secuencia visual ({videoFiles.length} imágenes)
+                </p>
+
+                <div className="grid max-h-40 grid-cols-2 gap-2 overflow-y-auto">
+                  {videoFiles.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex rounded-lg border border-gray-800 bg-gray-900 p-2 text-xs"
+                    >
+                      <span className="flex-1 truncate text-gray-300">
+                        {item.name}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVideoFiles((previous) =>
+                            previous.filter(
+                              (video) => video.id !== item.id
+                            )
+                          )
+                        }
+                        className="ml-2 text-red-500"
+                      >
+                        X
+                      </button>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            <button onClick={handleRenderProcess} disabled={isRendering || videoFiles.length === 0} className={`w-full font-bold py-4 rounded-xl shadow-lg ${isRendering ? 'bg-amber-600 animate-pulse' : 'bg-gradient-to-r from-red-600 to-amber-600'}`}>
-              {isRendering ? "⚙️ Renderizando Magia 3D..." : `🎬 Renderizar en ${engineMode.toUpperCase()}`}
+            <button
+              type="button"
+              onClick={handleRenderProcess}
+              disabled={isRendering || videoFiles.length === 0}
+              className={`w-full rounded-xl py-4 font-bold shadow-lg ${
+                isRendering
+                  ? "animate-pulse bg-amber-600"
+                  : "bg-gradient-to-r from-red-600 to-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+              }`}
+            >
+              {isRendering
+                ? "⚙️ Renderizando..."
+                : `🎬 Renderizar en ${
+                    engineMode === "local" ? "LOCAL" : "CLOUD"
+                  }`}
             </button>
 
             {videoResult && (
-              <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-2xl shadow-red-500/20">
-                <h3 className="text-sm font-bold text-green-400 mb-3">✅ Video Generado</h3>
-                <video src={videoResult} controls className={`w-full rounded-lg bg-black ${videoFormat === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]'}`} />
-                <a href={videoResult} download={`Tupia_Director_${videoFormat}.mp4`} className="mt-4 w-full block text-center bg-green-600 py-3 rounded-xl font-bold hover:bg-green-500 transition-colors">💾 Descargar MP4</a>
+              <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl shadow-red-500/20">
+                <h3 className="mb-3 text-sm font-bold text-green-400">
+                  ✅ Video generado
+                </h3>
+
+                <video
+                  src={videoResult}
+                  controls
+                  className={`w-full rounded-lg bg-black ${
+                    videoFormat === "horizontal"
+                      ? "aspect-video"
+                      : "aspect-[9/16]"
+                  }`}
+                />
+
+                <a
+                  href={videoResult}
+                  download={`Tupia_Director_${videoFormat}.mp4`}
+                  className="mt-4 block w-full rounded-xl bg-green-600 py-3 text-center font-bold transition-colors hover:bg-green-500"
+                >
+                  💾 Descargar MP4
+                </a>
               </div>
             )}
-            <div className="bg-black border border-gray-800 p-4 rounded-xl font-mono text-xs text-red-400 h-40 overflow-y-auto whitespace-pre-wrap">{ffmpegLog}</div>
+
+            <div className="h-40 overflow-y-auto whitespace-pre-wrap rounded-xl border border-gray-800 bg-black p-4 font-mono text-xs text-red-400">
+              {ffmpegLog}
+            </div>
           </div>
         )}
 
-        {/* TAB BÓVEDA LIMPIA Y EXACTA */}
-        {activeTab === 'settings' && (
-          <div className="p-6 space-y-4">
-            <h2 className="text-xl font-bold border-b border-gray-800 pb-2">🔑 Bóveda de Configuración</h2>
-            
-            <div className="bg-gray-900 p-3 rounded-xl border border-cyan-800/50 shadow-md">
-              <label className="block text-sm font-bold text-cyan-400 mb-1">🎨 Webhook Modal Serverless (Súper Fábrica)</label>
-              <input type="text" value={keys.modalWebhook} onChange={(e) => setKeys(prev => ({...prev, modalWebhook: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 text-sm" placeholder="Ej: https://tu-usuario--tupia-super-factory...modal.run" />
-              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para generar imágenes publicitarias (FLUX/DreamShaper) y videos (SVD).</p>
+        {activeTab === "settings" && (
+          <div className="space-y-4 p-6">
+            <h2 className="border-b border-gray-800 pb-2 text-xl font-bold">
+              ⚙️ Configuración
+            </h2>
+
+            <div className="rounded-xl border border-cyan-800/50 bg-gray-900 p-4">
+              <h3 className="font-bold text-cyan-400">
+                ☁️ Cloudflare Worker activo
+              </h3>
+
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                Las API Keys, el Webhook de Modal y la URL del VPS ya no se
+                almacenan en este navegador. El Worker administra estas
+                credenciales mediante secretos de Cloudflare.
+              </p>
+
+              <div className="mt-4 rounded-lg border border-green-800/50 bg-green-950/30 p-3 text-xs text-green-400">
+                ✅ Credenciales protegidas en el servidor
+              </div>
             </div>
 
-            <div className="bg-gray-900 p-3 rounded-xl border border-purple-800/50 shadow-md">
-              <label className="block text-sm font-bold text-purple-400 mb-1">🚀 Servidor VPS Ubuntu (Obrero 24/7)</label>
-              <input type="text" value={keys.vpsUrl} onChange={(e) => setKeys(prev => ({...prev, vpsUrl: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-purple-500 text-sm" placeholder="Ej: http://185.240.x.x:3000" />
-              <p className="text-[10px] text-gray-400 mt-1">Exclusivo para orquestar la producción 24/7 de la Fábrica y renderizar videos en segundo plano sin tu celular.</p>
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+              <h3 className="font-bold text-purple-400">
+                🧩 Preferencias de interfaz
+              </h3>
+
+              <p className="mt-2 text-xs text-gray-400">
+                Los chats se guardan localmente en este navegador. Las
+                solicitudes de IA, fábrica y render pasan por Cloudflare.
+              </p>
+
+              <div className="mt-4 space-y-2 text-xs text-gray-500">
+                <p>• Endpoint IA: /api/ai</p>
+                <p>• Endpoint Fábrica: /api/factory</p>
+                <p>• Endpoint Render: /api/render</p>
+              </div>
             </div>
 
-            <div className="border-t border-gray-800 pt-2">
-              {['openai', 'claude', 'gemini', 'deepseek', 'alibaba', 'nvidia', 'ghl'].map((id) => (
-                <div key={id} className="bg-gray-900 p-3 rounded-xl border border-gray-800 mt-2">
-                  <label className="block text-sm font-bold text-gray-300 mb-1 capitalize">{id === 'ghl' ? 'GoHighLevel (CRM)' : id}</label>
-                  <input type="password" value={keys[id]} onChange={(e) => setKeys(prev => ({...prev, [id]: e.target.value}))} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white focus:border-blue-500 text-sm" placeholder="Pega tu token aquí..." />
-                </div>
-              ))}
-            </div>
-
-            <button onClick={saveSettings} className={`w-full font-bold py-3 rounded-xl shadow-lg ${isSaved ? 'bg-green-600' : 'bg-blue-600'}`}>
-              {isSaved ? "✅ Guardado en Bóveda" : "💾 Guardar Ajustes"}
+            <button
+              type="button"
+              onClick={saveSettings}
+              className={`w-full rounded-xl py-3 font-bold shadow-lg ${
+                isSettingsSaved ? "bg-green-600" : "bg-blue-600"
+              }`}
+            >
+              {isSettingsSaved
+                ? "✅ Configuración guardada"
+                : "💾 Guardar preferencias"}
             </button>
+
+            {logs.length > 0 && (
+              <details className="rounded-xl border border-gray-800 bg-black p-3">
+                <summary className="cursor-pointer text-xs font-bold text-gray-400">
+                  Ver registro local
+                </summary>
+
+                <div className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono text-[10px] text-gray-500">
+                  {logs.join("\n")}
+                </div>
+              </details>
+            )}
           </div>
         )}
       </main>
 
-      {/* CONTROLES DE ESCRITURA INFERIORES */}
-      {activeTab === 'chat' && (
-        <div className="fixed bottom-[70px] left-0 w-full bg-gray-900 border-t border-gray-800 z-10 p-2 flex flex-col gap-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+      {activeTab === "chat" && (
+        <div className="fixed bottom-[70px] left-0 z-10 flex w-full flex-col gap-2 border-t border-gray-800 bg-gray-900 p-2 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
           <div className="grid grid-cols-3 gap-1">
-            <select value={activeModel} onChange={(e) => setActiveModel(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-blue-400 font-bold rounded-lg p-2 outline-none">
-              <option value="openai">OpenAI (Director)</option>
+            <select
+              value={activeModel}
+              onChange={(event) =>
+                setActiveModel(event.target.value)
+              }
+              className="rounded-lg border border-gray-700 bg-black p-2 text-[10px] font-bold text-blue-400 outline-none md:text-xs"
+            >
+              <option value="openai">OpenAI</option>
               <option value="deepseek">DeepSeek</option>
               <option value="claude">Claude</option>
               <option value="gemini">Gemini</option>
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
             </select>
-            <select value={specificModel} onChange={(e) => setSpecificModel(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-green-400 font-bold rounded-lg p-2 outline-none">
-              {MODEL_VERSIONS[activeModel] && MODEL_VERSIONS[activeModel].map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+
+            <select
+              value={specificModel}
+              onChange={(event) =>
+                setSpecificModel(event.target.value)
+              }
+              className="rounded-lg border border-gray-700 bg-black p-2 text-[10px] font-bold text-green-400 outline-none md:text-xs"
+            >
+              {MODEL_VERSIONS[activeModel]?.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
               ))}
             </select>
-            <select value={activePersona} onChange={(e) => setActivePersona(e.target.value)} className="bg-black border border-gray-700 text-[10px] md:text-xs text-purple-400 font-bold rounded-lg p-2 outline-none">
+
+            <select
+              value={activePersona}
+              onChange={(event) =>
+                setActivePersona(event.target.value)
+              }
+              className="rounded-lg border border-gray-700 bg-black p-2 text-[10px] font-bold text-purple-400 outline-none md:text-xs"
+            >
               <option value="default">🗣️ Normal</option>
-              <option value="director">🎬 Director AI</option>
+              <option value="director">🎬 Director</option>
               <option value="plan">🗺️ Plan</option>
               <option value="think">🤔 Think</option>
               <option value="build">🏗️ Build</option>
@@ -711,21 +1586,101 @@ export default function AppUI() {
               <option value="infoproducto">📦 Venta</option>
             </select>
           </div>
-          <form onSubmit={handleSubmit} className="flex gap-2 w-full">
-            <button type="button" onClick={() => fileInputRef.current.click()} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 w-[50px] rounded-xl flex justify-center items-center">📎</button>
-            <input type="file" multiple className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-            <input className="flex-1 bg-black border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ej: Crea un video sobre vender casas..." />
-            <button type="submit" disabled={(!input.trim() && attachments.length===0) || isLoading} className="bg-blue-600 disabled:bg-gray-800 w-[50px] rounded-xl font-bold text-white">➤</button>
+
+          <form
+            onSubmit={handleSubmit}
+            className="flex w-full gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-[50px] items-center justify-center rounded-xl border border-gray-700 bg-gray-800 hover:bg-gray-700"
+            >
+              📎
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept="image/*,.txt,.js,.jsx,.ts,.tsx,.json,.css,.html,.md"
+              onChange={handleFileChange}
+            />
+
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              className="flex-1 rounded-xl border border-gray-700 bg-black px-4 py-3 text-sm outline-none focus:border-blue-500"
+              placeholder="Escribe tu solicitud..."
+            />
+
+            <button
+              type="submit"
+              disabled={
+                (!input.trim() && attachments.length === 0) ||
+                isLoading
+              }
+              className="w-[50px] rounded-xl bg-blue-600 font-bold text-white disabled:bg-gray-800"
+            >
+              ➤
+            </button>
           </form>
         </div>
       )}
 
-      {/* MENÚ INFERIOR */}
-      <nav className="fixed bottom-0 left-0 w-full bg-gray-950 border-t border-gray-800 flex justify-around p-2 z-20 h-[70px]">
-        <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='chat'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">💬</span><span className="text-[9px] font-bold">CHAT</span></button>
-        <button onClick={() => setActiveTab('factory')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='factory'?'text-cyan-500':'text-gray-500'}`}><span className="text-lg">📸</span><span className="text-[9px] font-bold">FÁBRICA</span></button>
-        <button onClick={() => setActiveTab('studio')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='studio'?'text-red-500':'text-gray-500'}`}><span className="text-lg">🎬</span><span className="text-[9px] font-bold">ESTUDIO</span></button>
-        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center p-1 w-16 ${activeTab==='settings'?'text-blue-500':'text-gray-500'}`}><span className="text-lg">⚙️</span><span className="text-[9px] font-bold">BÓVEDA</span></button>
+      <nav className="fixed bottom-0 left-0 z-20 flex h-[70px] w-full justify-around border-t border-gray-800 bg-gray-950 p-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab("chat")}
+          className={`flex w-16 flex-col items-center p-1 ${
+            activeTab === "chat"
+              ? "text-blue-500"
+              : "text-gray-500"
+          }`}
+        >
+          <span className="text-lg">💬</span>
+          <span className="text-[9px] font-bold">CHAT</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("factory")}
+          className={`flex w-16 flex-col items-center p-1 ${
+            activeTab === "factory"
+              ? "text-cyan-500"
+              : "text-gray-500"
+          }`}
+        >
+          <span className="text-lg">📸</span>
+          <span className="text-[9px] font-bold">FÁBRICA</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("studio")}
+          className={`flex w-16 flex-col items-center p-1 ${
+            activeTab === "studio"
+              ? "text-red-500"
+              : "text-gray-500"
+          }`}
+        >
+          <span className="text-lg">🎬</span>
+          <span className="text-[9px] font-bold">ESTUDIO</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("settings")}
+          className={`flex w-16 flex-col items-center p-1 ${
+            activeTab === "settings"
+              ? "text-blue-500"
+              : "text-gray-500"
+          }`}
+        >
+          <span className="text-lg">⚙️</span>
+          <span className="text-[9px] font-bold">AJUSTES</span>
+        </button>
       </nav>
     </div>
   );
