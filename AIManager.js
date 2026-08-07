@@ -27,35 +27,35 @@ const CAMERA_EFFECTS = [
 ];
 
 // ============================================================================
-// MODELOS DISPONIBLES
+// MODELOS DISPONIBLES (Actualizado a Nomenclaturas Oficiales)
 // ============================================================================
 
 export const MODEL_VERSIONS = {
   openai: [
-    { id: "gpt-6-luna", name: "GPT-6 Luna" },
+    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
     { id: "gpt-4o", name: "GPT-4o" },
     { id: "gpt-4o-mini", name: "GPT-4o Mini" }
   ],
 
   claude: [
-    { id: "claude-3-5-sonnet-20241022", name: "Claude Sonnet 3.5" },
-    { id: "claude-3-5-haiku-20241022", name: "Claude Haiku 3.5" }
+    { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" }
   ],
 
   gemini: [
-    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
     { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" }
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" }
   ],
 
   deepseek: [
-    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
-    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" }
   ],
 
   alibaba: [
-    { id: "qwen-plus", name: "Qwen Plus" },
-    { id: "qwen-max", name: "Qwen Max" }
+    { id: "qwen-max", name: "Qwen Max" },
+    { id: "qwen-plus", name: "Qwen Plus" }
   ],
 
   nvidia: [
