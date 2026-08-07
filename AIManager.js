@@ -11,36 +11,6 @@
 //
 // Endpoint esperado:
 // POST /api/ai
-//
-// Body enviado:
-//
-// {
-//   "activeModel": "openai",
-//   "specificModel": "gpt-4o-mini",
-//   "activePersona": "director",
-//   "prompt": "...",
-//   "history": [],
-//   "images": []
-// }
-//
-// Respuesta recomendada del Worker:
-//
-// {
-//   "reply": "Respuesta de la IA"
-// }
-//
-// o:
-//
-// {
-//   "content": "Respuesta de la IA"
-// }
-//
-// o, para el Director:
-//
-// {
-//   "reply": "[{\"id\":0,\"texto_pantalla\":\"...\"}]",
-//   "directorPlan": []
-// }
 // ============================================================================
 
 const API_BASE = "https://tupia-local-agent1.titigamer1468.workers.dev";
@@ -59,81 +29,44 @@ const CAMERA_EFFECTS = [
 // ============================================================================
 // MODELOS DISPONIBLES
 // ============================================================================
-//
-// No se incluyen API Keys aquí.
-//
-// Los modelos deben coincidir con los modelos que realmente acepte tu Worker.
-// ============================================================================
 
 export const MODEL_VERSIONS = {
   openai: [
-    {
-      id: "gpt-4o-mini",
-      name: "GPT-4o Mini"
-    },
-    {
-      id: "gpt-4o",
-      name: "GPT-4o"
-    },
-    {
-      id: "gpt-4.1",
-      name: "GPT-4.1"
-    }
+    { id: "gpt-6-luna", name: "GPT-6 Luna" },
+    { id: "gpt-4o", name: "GPT-4o" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini" }
   ],
 
   claude: [
-    {
-      id: "claude-3-5-sonnet-20241022",
-      name: "Claude Sonnet 3.5"
-    },
-    {
-      id: "claude-3-5-haiku-20241022",
-      name: "Claude Haiku 3.5"
-    }
+    { id: "claude-3-5-sonnet-20241022", name: "Claude Sonnet 3.5" },
+    { id: "claude-3-5-haiku-20241022", name: "Claude Haiku 3.5" }
   ],
 
   gemini: [
-    {
-      id: "gemini-1.5-flash",
-      name: "Gemini 1.5 Flash"
-    },
-    {
-      id: "gemini-1.5-pro",
-      name: "Gemini 1.5 Pro"
-    },
-    {
-      id: "gemini-2.0-flash",
-      name: "Gemini 2.0 Flash"
-    }
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" }
   ],
 
   deepseek: [
-    {
-      id: "deepseek-chat",
-      name: "DeepSeek V3 Chat"
-    },
-    {
-      id: "deepseek-reasoner",
-      name: "DeepSeek R1 Reasoner"
-    }
+    { id: "deepseek-v4", name: "DeepSeek V4" },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }
   ],
 
   alibaba: [
-    {
-      id: "qwen-plus",
-      name: "Qwen Plus"
-    },
-    {
-      id: "qwen-max",
-      name: "Qwen Max"
-    }
+    { id: "qwen-plus", name: "Qwen Plus" },
+    { id: "qwen-max", name: "Qwen Max" }
   ],
 
   nvidia: [
-    {
-      id: "meta/llama3-70b-instruct",
-      name: "Llama 3 70B"
-    }
+    { id: "meta/llama3-70b-instruct", name: "Llama 3 70B" }
+  ],
+
+  multimedia: [
+    { id: "dall-e-3", name: "DALL-E 3 (Imagen)" },
+    { id: "flux-schnell", name: "Flux Schnell (Imagen)" },
+    { id: "tts-1", name: "OpenAI TTS-1 (Locución/Voz)" },
+    { id: "elevenlabs", name: "ElevenLabs (Locución/Voz)" }
   ]
 };
 
@@ -181,19 +114,8 @@ Reglas:
 
 - "id" debe comenzar en 0 y aumentar consecutivamente.
 - "texto_pantalla" debe ser texto breve, potente y legible en móvil.
-- "duracion" debe ser un número en segundos.
-- "duracion" debe estar entre 2 y 12 segundos.
-- "efecto_camara" solo puede usar uno de estos valores:
-  "zoom_in_3d",
-  "zoom_out_3d",
-  "pan_right",
-  "pan_left",
-  "wind_float",
-  "wave_float".
-- No generes voz.
-- No generes audio.
-- No generes imágenes.
-- Solo genera texto visual y movimiento de cámara.
+- "duracion" debe ser un número en segundos entre 2 y 12.
+- "efecto_camara" solo puede usar uno de estos valores: "zoom_in_3d", "zoom_out_3d", "pan_right", "pan_left", "wind_float", "wave_float".
 `,
 
   youtube:
@@ -329,7 +251,7 @@ const parseJsonArrayFromText = (text) => {
       return directValue;
     }
   } catch {
-    // Se intenta extraer el array más adelante.
+    // Se intenta extraer el array más adelante
   }
 
   const startIndex = cleaned.indexOf("[");
@@ -479,8 +401,6 @@ export async function procesarConsultaIA({
     images: safeImages
   };
 
-  // currentKey se mantiene en la firma por compatibilidad con versiones
-  // antiguas, pero deliberadamente no se envía al navegador ni al Worker.
   void currentKey;
 
   let response;
@@ -569,10 +489,6 @@ export async function procesarConsultaIA({
 // ============================================================================
 // 🚀 PUENTE UNIVERSAL MODAL SERVERLESS
 // ============================================================================
-//
-// Esta función se conserva por compatibilidad, pero Modal Serverless
-// ahora debe ser llamado desde el Cloudflare Worker.
-// ============================================================================
 
 export async function conectarModalServerless(
   workflowJSON,
@@ -633,11 +549,6 @@ export async function conectarModalServerless(
 
 // ============================================================================
 // 📸 MOTOR DE RESPALDO DE IMÁGENES
-// ============================================================================
-//
-// Nota:
-// Esta función usa un servicio externo desde el navegador.
-// Puede fallar por CORS, límites o disponibilidad del proveedor.
 // ============================================================================
 
 export async function generarImagenIA(

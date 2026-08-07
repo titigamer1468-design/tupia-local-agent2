@@ -1554,6 +1554,7 @@ También puedes escribir una instrucción de texto por línea.`}
               <option value="gemini">Gemini</option>
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
+              <option value="multimedia">📸 Generar Imagen / Voz</option>
             </select>
 
             <select
