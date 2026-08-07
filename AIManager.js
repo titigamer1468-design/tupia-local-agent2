@@ -49,7 +49,7 @@ export const MODEL_VERSIONS = {
   ],
 
   deepseek: [
-    { id: "deepseek-v4", name: "DeepSeek V4" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
     { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }
   ],
 
