@@ -236,7 +236,6 @@ export default {
         const dedicatedServerUrl = env.MODAL_WEBHOOK_URL || env.VPS_URL;
 
         if (dedicatedServerUrl) {
-          // Si es VPS agregamos ruta, si es Modal llamamos directo a la URL base
           const targetUrl = dedicatedServerUrl.includes("modal.run")
             ? dedicatedServerUrl
             : `${dedicatedServerUrl.replace(/\/$/, "")}/api/factory`;
@@ -257,32 +256,14 @@ export default {
           return jsonResponse(data, res.status);
         }
 
-        // 2. FALLBACK NUBE (Solo si NO hay Modal ni VPS configurado)
+        // 2. AVISO PARA MODO VIDEO (Si no hay webhook configurado)
         if (factoryMode === "video") {
-          const seed = Math.floor(Math.random() * 1000000);
-          const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(promptText)}?seed=${seed}&width=720&height=1280&model=wan`;
-
-          const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) {
-            throw new Error(`El motor de video en la nube devolvió HTTP ${videoRes.status}`);
-          }
-
-          const arrayBuffer = await videoRes.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-          let binary = "";
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64Video = btoa(binary);
-
           return jsonResponse({
-            archivo_base64: base64Video,
-            extension: "mp4",
-            status: "success"
-          });
+            error: "Falta configurar MODAL_WEBHOOK_URL en Cloudflare. Para generar video se requiere conectar tu backend de Modal con GPU."
+          }, 400);
         }
 
-        // Fallback Imagen (Flux HD)
+        // 3. FALLBACK MODO IMAGEN (Flux HD)
         const seed = Math.floor(Math.random() * 1000000);
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?width=1080&height=1920&seed=${seed}&nologo=true&model=flux`;
 
