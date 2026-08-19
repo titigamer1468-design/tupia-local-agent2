@@ -1,5 +1,5 @@
 // ============================================================================
-// ☁️ worker/index.js - ROUTER DE CLOUDFLARE WORKERS (SIN SECRETOS HARDCODEADOS)
+// ☁️ worker/index.js - ROUTER PRINCIPAL DE CLOUDFLARE WORKERS
 // ============================================================================
 
 const CORS_HEADERS = {
@@ -26,7 +26,7 @@ export default {
     const url = new URL(request.url);
 
     // ========================================================================
-    // 1. ENDPOINT DE INTELIGENCIA ARTIFICIAL (/api/ai)
+    // 1. CONSULTAS DE INTELIGENCIA ARTIFICIAL (/api/ai)
     // ========================================================================
     if (url.pathname === "/api/ai" && request.method === "POST") {
       try {
@@ -37,7 +37,6 @@ export default {
         const history = Array.isArray(body.history) ? body.history : [];
         const systemInstruction = body.systemInstruction || "";
 
-        // Formateo de mensajes estándar
         const messages = [];
         if (systemInstruction) {
           messages.push({ role: "system", content: systemInstruction });
@@ -51,11 +50,11 @@ export default {
           messages.push({ role: "user", content: prompt });
         }
 
-        // --- PROVEEDOR: DEEPSEEK ---
+        // --- DEEPSEEK ---
         if (provider === "deepseek") {
           const apiKey = env.DEEPSEEK_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar DEEPSEEK_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar DEEPSEEK_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const res = await fetch("https://api.deepseek.com/chat/completions", {
@@ -79,11 +78,11 @@ export default {
           return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
         }
 
-        // --- PROVEEDOR: OPENAI ---
+        // --- OPENAI ---
         if (provider === "openai") {
           const apiKey = env.OPENAI_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar OPENAI_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar OPENAI_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -107,11 +106,11 @@ export default {
           return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
         }
 
-        // --- PROVEEDOR: CLAUDE (ANTHROPIC) ---
+        // --- CLAUDE ---
         if (provider === "claude") {
           const apiKey = env.ANTHROPIC_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar ANTHROPIC_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar ANTHROPIC_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -137,11 +136,11 @@ export default {
           return jsonResponse({ reply: data?.content?.[0]?.text || "" });
         }
 
-        // --- PROVEEDOR: GEMINI ---
+        // --- GEMINI ---
         if (provider === "gemini") {
           const apiKey = env.GEMINI_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar GEMINI_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar GEMINI_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const targetModel = model || "gemini-2.0-flash";
@@ -166,11 +165,11 @@ export default {
           return jsonResponse({ reply: replyText });
         }
 
-        // --- PROVEEDOR: ALIBABA (QWEN) ---
+        // --- ALIBABA ---
         if (provider === "alibaba") {
           const apiKey = env.ALIBABA_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar ALIBABA_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar ALIBABA_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
@@ -179,10 +178,7 @@ export default {
               "Content-Type": "application/json",
               Authorization: `Bearer ${apiKey}`
             },
-            body: JSON.stringify({
-              model: model || "qwen-max",
-              messages
-            })
+            body: JSON.stringify({ model: model || "qwen-max", messages })
           });
 
           const data = await res.json();
@@ -193,11 +189,11 @@ export default {
           return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
         }
 
-        // --- PROVEEDOR: NVIDIA ---
+        // --- NVIDIA ---
         if (provider === "nvidia") {
           const apiKey = env.NVIDIA_API_KEY;
           if (!apiKey) {
-            return jsonResponse({ error: "Falta configurar NVIDIA_API_KEY en las variables del Worker." }, 500);
+            return jsonResponse({ error: "Falta configurar NVIDIA_API_KEY en Cloudflare Secrets." }, 500);
           }
 
           const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
@@ -209,8 +205,6 @@ export default {
             body: JSON.stringify({
               model: model || "meta/llama3-70b-instruct",
               messages,
-              temperature: 0.5,
-              top_p: 1,
               max_tokens: 1024
             })
           });
@@ -230,32 +224,79 @@ export default {
     }
 
     // ========================================================================
-    // 2. ENDPOINT DE FÁBRICA / VPS / MODAL (/api/factory)
+    // 2. ENRUTADOR DE SÚPER FÁBRICA (/api/factory)
     // ========================================================================
     if (url.pathname === "/api/factory" && request.method === "POST") {
       try {
         const body = await request.json();
-        const targetUrl = env.MODAL_WEBHOOK_URL || env.VPS_URL;
+        const { factoryMode, workflow, imagen_base64, itemIndex } = body;
+        const promptText = typeof workflow === "string" ? workflow : JSON.stringify(workflow);
 
-        if (!targetUrl) {
-          return jsonResponse({ error: "No hay MODAL_WEBHOOK_URL ni VPS_URL configurados en el Worker." }, 500);
+        // A. GENERACIÓN DE VIDEO (Requiere GPU dedicada / VPS / Modal)
+        if (factoryMode === "video") {
+          const videoEndpoint = env.VPS_URL || env.MODAL_WEBHOOK_URL;
+
+          if (videoEndpoint) {
+            const res = await fetch(`${videoEndpoint}/api/generate-video`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt: promptText,
+                image_base64: imagen_base64 || null,
+                index: itemIndex
+              })
+            });
+
+            const data = await res.json();
+            return jsonResponse(data, res.status);
+          }
+
+          return jsonResponse({
+            error: "La generación de video requiere configurar VPS_URL o MODAL_WEBHOOK_URL con GPU dedicada en Cloudflare."
+          }, 503);
         }
 
-        const response = await fetch(targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
+        // B. GENERACIÓN DE IMAGEN (VPS ComfyUI o Fallback Flux HD)
+        if (env.VPS_URL) {
+          const res = await fetch(`${env.VPS_URL}/api/generate-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          const data = await res.json();
+          return jsonResponse(data, res.status);
+        }
+
+        // Fallback nube en alta definición (Flux Schnell HD)
+        const seed = Math.floor(Math.random() * 1000000);
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?width=1080&height=1920&seed=${seed}&nologo=true&model=flux`;
+
+        const imageRes = await fetch(imageUrl);
+        if (!imageRes.ok) {
+          throw new Error(`El servicio de imagen falló con HTTP ${imageRes.status}`);
+        }
+
+        const arrayBuffer = await imageRes.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Image = btoa(binary);
+
+        return jsonResponse({
+          archivo_base64: base64Image,
+          extension: "png",
+          status: "success"
         });
 
-        const data = await response.json();
-        return jsonResponse(data, response.status);
       } catch (err) {
         return jsonResponse({ error: `Fallo en Fábrica: ${err.message}` }, 500);
       }
     }
 
     // ========================================================================
-    // 3. ENDPOINT DE RENDER (/api/render)
+    // 3. ENRUTADOR DE RENDERIZADO (/api/render)
     // ========================================================================
     if (url.pathname === "/api/render" && request.method === "POST") {
       try {
@@ -263,7 +304,7 @@ export default {
         const vpsUrl = env.VPS_URL;
 
         if (!vpsUrl) {
-          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare." }, 500);
+          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare para renders en la nube." }, 500);
         }
 
         const response = await fetch(`${vpsUrl}/render`, {
@@ -280,7 +321,7 @@ export default {
     }
 
     // ========================================================================
-    // 4. SERVIR ASSETS ESTÁTICOS (Vite Build)
+    // 4. ARCHIVOS ESTÁTICOS
     // ========================================================================
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);

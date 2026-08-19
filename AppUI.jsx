@@ -115,7 +115,7 @@ export default function AppUI() {
   const [logs, setLogs] = useState([]);
 
   const [activeModel, setActiveModel] = useState("openai");
-  const [specificModel, setSpecificModel] = useState("gpt-4o-mini");
+  const [specificModel, setSpecificModel] = useState("gpt-5.6-luna");
   const [activePersona, setActivePersona] = useState("director");
 
   // ESTUDIO
@@ -483,18 +483,19 @@ export default function AppUI() {
           try {
             const result = await processFactoryTask(prompt, index);
 
-            // 🔥 VALIDACIÓN CRÍTICA CONTRA RESPUESTAS CORRUPTAS 🔥
             if (!result || typeof result !== "object") {
               throw new Error("La fábrica devolvió una respuesta inválida.");
             }
 
             const responseForReport = { ...result };
+            const isVideo = factoryMode === "video";
+            const targetFolder = isVideo ? "Videos_Generados" : "Imagenes_Generadas";
 
             if (result.archivo_base64) {
-              const extension = result.extension || "png";
+              const extension = result.extension || (isVideo ? "mp4" : "png");
 
               zip
-                .folder("Resultados_Visuales")
+                .folder(targetFolder)
                 .file(
                   `Resultado_${taskNumber}.${extension}`,
                   result.archivo_base64,
@@ -505,7 +506,7 @@ export default function AppUI() {
                 `✅ Archivo .${extension.toUpperCase()} guardado en el ZIP.`;
             } else if (result.imagen_base64) {
               zip
-                .folder("Resultados_Visuales")
+                .folder(targetFolder)
                 .file(
                   `Resultado_${taskNumber}.png`,
                   result.imagen_base64,

@@ -1,9 +1,0 @@
-{
-  "manifest_version": 3,
-  "name": "Video Downloader Pro",
-  "version": "1.0",
-  "permissions": ["downloads", "activeTab"],
-  "action": {
-    "default_popup": "popup.html"
-  }
-}
