@@ -232,10 +232,11 @@ export default {
         const { factoryMode, workflow, imagen_base64, itemIndex } = body;
         const promptText = typeof workflow === "string" ? workflow : JSON.stringify(workflow);
 
-        // A. GENERACIÓN DE VIDEO (Requiere GPU dedicada / VPS / Modal)
+        // --- A. MODO VIDEO ---
         if (factoryMode === "video") {
           const videoEndpoint = env.VPS_URL || env.MODAL_WEBHOOK_URL;
 
+          // 1. Si tienes VPS o Modal configurado, se envía allí
           if (videoEndpoint) {
             const res = await fetch(`${videoEndpoint}/api/generate-video`, {
               method: "POST",
@@ -251,12 +252,31 @@ export default {
             return jsonResponse(data, res.status);
           }
 
+          // 2. Fallback de Video en la nube (Generación directa sin servidor VPS)
+          const seed = Math.floor(Math.random() * 1000000);
+          const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(promptText)}?seed=${seed}&width=720&height=1280&model=wan`;
+
+          const videoRes = await fetch(videoUrl);
+          if (!videoRes.ok) {
+            throw new Error(`El motor de video en la nube devolvió HTTP ${videoRes.status}`);
+          }
+
+          const arrayBuffer = await videoRes.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64Video = btoa(binary);
+
           return jsonResponse({
-            error: "La generación de video requiere configurar VPS_URL o MODAL_WEBHOOK_URL con GPU dedicada en Cloudflare."
-          }, 503);
+            archivo_base64: base64Video,
+            extension: "mp4",
+            status: "success"
+          });
         }
 
-        // B. GENERACIÓN DE IMAGEN (VPS ComfyUI o Fallback Flux HD)
+        // --- B. MODO IMAGEN ---
         if (env.VPS_URL) {
           const res = await fetch(`${env.VPS_URL}/api/generate-image`, {
             method: "POST",
@@ -267,13 +287,13 @@ export default {
           return jsonResponse(data, res.status);
         }
 
-        // Fallback nube en alta definición (Flux Schnell HD)
+        // Fallback de Imagen en alta resolución (Flux HD)
         const seed = Math.floor(Math.random() * 1000000);
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?width=1080&height=1920&seed=${seed}&nologo=true&model=flux`;
 
         const imageRes = await fetch(imageUrl);
         if (!imageRes.ok) {
-          throw new Error(`El servicio de imagen falló con HTTP ${imageRes.status}`);
+          throw new Error(`El motor de imagen falló con HTTP ${imageRes.status}`);
         }
 
         const arrayBuffer = await imageRes.arrayBuffer();
@@ -304,7 +324,7 @@ export default {
         const vpsUrl = env.VPS_URL;
 
         if (!vpsUrl) {
-          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare para renders en la nube." }, 500);
+          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare para renders remotos." }, 500);
         }
 
         const response = await fetch(`${vpsUrl}/render`, {
