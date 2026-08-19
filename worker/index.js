@@ -232,27 +232,33 @@ export default {
         const { factoryMode, workflow, imagen_base64, itemIndex } = body;
         const promptText = typeof workflow === "string" ? workflow : JSON.stringify(workflow);
 
-        // --- A. MODO VIDEO ---
+        // 1. PRIORIDAD TOTAL: Si tienes MODAL_WEBHOOK_URL o VPS_URL configurado
+        const dedicatedServerUrl = env.MODAL_WEBHOOK_URL || env.VPS_URL;
+
+        if (dedicatedServerUrl) {
+          // Si es VPS agregamos ruta, si es Modal llamamos directo a la URL base
+          const targetUrl = dedicatedServerUrl.includes("modal.run")
+            ? dedicatedServerUrl
+            : `${dedicatedServerUrl.replace(/\/$/, "")}/api/factory`;
+
+          const res = await fetch(targetUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              factoryMode,
+              prompt: promptText,
+              workflow,
+              imagen_base64: imagen_base64 || null,
+              itemIndex: itemIndex || 0
+            })
+          });
+
+          const data = await res.json();
+          return jsonResponse(data, res.status);
+        }
+
+        // 2. FALLBACK NUBE (Solo si NO hay Modal ni VPS configurado)
         if (factoryMode === "video") {
-          const videoEndpoint = env.VPS_URL || env.MODAL_WEBHOOK_URL;
-
-          // 1. Si tienes VPS o Modal configurado, se envía allí
-          if (videoEndpoint) {
-            const res = await fetch(`${videoEndpoint}/api/generate-video`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                prompt: promptText,
-                image_base64: imagen_base64 || null,
-                index: itemIndex
-              })
-            });
-
-            const data = await res.json();
-            return jsonResponse(data, res.status);
-          }
-
-          // 2. Fallback de Video en la nube (Generación directa sin servidor VPS)
           const seed = Math.floor(Math.random() * 1000000);
           const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(promptText)}?seed=${seed}&width=720&height=1280&model=wan`;
 
@@ -276,18 +282,7 @@ export default {
           });
         }
 
-        // --- B. MODO IMAGEN ---
-        if (env.VPS_URL) {
-          const res = await fetch(`${env.VPS_URL}/api/generate-image`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-          });
-          const data = await res.json();
-          return jsonResponse(data, res.status);
-        }
-
-        // Fallback de Imagen en alta resolución (Flux HD)
+        // Fallback Imagen (Flux HD)
         const seed = Math.floor(Math.random() * 1000000);
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?width=1080&height=1920&seed=${seed}&nologo=true&model=flux`;
 
