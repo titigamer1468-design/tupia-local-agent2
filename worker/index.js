@@ -1,318 +1,291 @@
-const JSON_HEADERS = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store"
+// ============================================================================
+// ☁️ worker/index.js - ROUTER DE CLOUDFLARE WORKERS (SIN SECRETOS HARDCODEADOS)
+// ============================================================================
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization"
 };
 
-function json(data, status = 200, extraHeaders = {}) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        ...JSON_HEADERS,
-        ...extraHeaders
-      }
-    }
-  );
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get("Origin");
-
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Max-Age": "86400"
-  };
-}
-
-function responseWithCors(response, request) {
-  const headers = new Headers(response.headers);
-
-  for (const [key, value] of Object.entries(
-    corsHeaders(request)
-  )) {
-    headers.set(key, value);
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
-}
-
-async function readJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    throw new Error(
-      "El cuerpo de la petición debe ser JSON válido."
-    );
-  }
-}
-
-function normalizeMessages(body) {
-  if (Array.isArray(body?.messages)) {
-    return body.messages;
-  }
-
-  if (typeof body?.prompt === "string") {
-    return [
-      {
-        role: "user",
-        content: body.prompt
-      }
-    ];
-  }
-
-  throw new Error(
-    "La petición debe incluir 'prompt' o 'messages'."
-  );
-}
-
-async function handleHealth() {
-  return json({
-    ok: true,
-    service: "tupia-local-agent",
-    runtime: "cloudflare-workers",
-    timestamp: new Date().toISOString()
-  });
-}
-
-async function handleAI(request, env) {
-  const body = await readJson(request);
-  const messages = normalizeMessages(body);
-
-  const model =
-    body.model ||
-    env.OPENAI_MODEL ||
-    "@cf/meta/llama-3.1-8b-instruct";
-
-  /*
-   * Opción 1: Cloudflare Workers AI.
-   *
-   * Para usarla, configura un binding llamado AI en Cloudflare.
-   */
-  if (env.AI) {
-    const prompt = messages
-      .map((message) => {
-        return `${message.role}: ${message.content}`;
-      })
-      .join("\n");
-
-    const resultado = await env.AI.run(model, {
-      prompt
-    });
-
-    const texto =
-      resultado?.response ||
-      resultado?.result?.response ||
-      JSON.stringify(resultado);
-
-    return json({
-      ok: true,
-      provider: "cloudflare-workers-ai",
-      model,
-      text: texto,
-      response: texto
-    });
-  }
-
-  /*
-   * Opción 2: API compatible con OpenAI.
-   *
-   * Variables necesarias:
-   * OPENAI_API_KEY
-   * OPENAI_MODEL, opcional
-   * OPENAI_BASE_URL, opcional
-   */
-  if (!env.OPENAI_API_KEY) {
-    return json(
-      {
-        ok: false,
-        error:
-          "No hay proveedor de IA configurado. " +
-          "Configura el binding AI o OPENAI_API_KEY."
-      },
-      503
-    );
-  }
-
-  const baseUrl =
-    env.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1";
-
-  const endpoint =
-    `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-
-  const respuesta = await fetch(endpoint, {
-    method: "POST",
+const jsonResponse = (data, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature:
-        typeof body.temperature === "number"
-          ? body.temperature
-          : 0.2,
-      max_tokens:
-        typeof body.max_tokens === "number"
-          ? body.max_tokens
-          : undefined
-    })
+      ...CORS_HEADERS
+    }
   });
-
-  const datos = await respuesta.json();
-
-  if (!respuesta.ok) {
-    return json(
-      {
-        ok: false,
-        error:
-          datos?.error?.message ||
-          "El proveedor de IA devolvió un error.",
-        providerResponse: datos
-      },
-      respuesta.status
-    );
-  }
-
-  const texto =
-    datos?.choices?.[0]?.message?.content || "";
-
-  return json({
-    ok: true,
-    provider: "openai-compatible",
-    model,
-    text: texto,
-    response: texto,
-    usage: datos.usage || null
-  });
-}
-
-async function handleFactory(request) {
-  const body = await readJson(request);
-
-  return json({
-    ok: true,
-    type: "factory",
-    received: body,
-    message:
-      "Solicitud de fábrica recibida correctamente."
-  });
-}
-
-async function handleRender(request) {
-  const body = await readJson(request);
-
-  return json({
-    ok: true,
-    type: "render",
-    status: "queued",
-    received: body,
-    message:
-      "Solicitud de render recibida. " +
-      "El procesamiento local debe realizarse en el navegador."
-  });
-}
-
-async function handleApi(request, env, pathname) {
-  if (request.method === "GET" && pathname === "/api/health") {
-    return handleHealth();
-  }
-
-  if (request.method !== "POST") {
-    return json(
-      {
-        ok: false,
-        error: "Método no permitido."
-      },
-      405,
-      {
-        Allow: "GET, POST, OPTIONS"
-      }
-    );
-  }
-
-  if (pathname === "/api/ai") {
-    return handleAI(request, env);
-  }
-
-  if (pathname === "/api/factory") {
-    return handleFactory(request);
-  }
-
-  if (pathname === "/api/render") {
-    return handleRender(request);
-  }
-
-  return json(
-    {
-      ok: false,
-      error: "Ruta API no encontrada."
-    },
-    404
-  );
-}
 
 export default {
   async fetch(request, env) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: CORS_HEADERS });
+    }
+
     const url = new URL(request.url);
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(request)
-      });
-    }
+    // ========================================================================
+    // 1. ENDPOINT DE INTELIGENCIA ARTIFICIAL (/api/ai)
+    // ========================================================================
+    if (url.pathname === "/api/ai" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const provider = body.activeModel || body.provider || "openai";
+        const model = body.specificModel || body.model;
+        const prompt = body.prompt || body.finalInput || "";
+        const history = Array.isArray(body.history) ? body.history : [];
+        const systemInstruction = body.systemInstruction || "";
 
-    try {
-      if (url.pathname.startsWith("/api/")) {
-        const respuesta = await handleApi(
-          request,
-          env,
-          url.pathname
-        );
-
-        return responseWithCors(
-          respuesta,
-          request
-        );
-      }
-
-      if (!env.ASSETS) {
-        return new Response(
-          "Binding ASSETS no configurado.",
-          {
-            status: 500,
-            headers: {
-              "Content-Type": "text/plain; charset=utf-8"
-            }
+        // Formateo de mensajes estándar
+        const messages = [];
+        if (systemInstruction) {
+          messages.push({ role: "system", content: systemInstruction });
+        }
+        history.forEach((msg) => {
+          if (msg?.role && msg?.content) {
+            messages.push({ role: msg.role, content: String(msg.content) });
           }
-        );
+        });
+        if (prompt) {
+          messages.push({ role: "user", content: prompt });
+        }
+
+        // --- PROVEEDOR: DEEPSEEK ---
+        if (provider === "deepseek") {
+          const apiKey = env.DEEPSEEK_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar DEEPSEEK_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const res = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: model || "deepseek-v4-flash",
+              messages,
+              stream: false
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || data?.error || `Error DeepSeek HTTP ${res.status}` }, res.status);
+          }
+
+          return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
+        }
+
+        // --- PROVEEDOR: OPENAI ---
+        if (provider === "openai") {
+          const apiKey = env.OPENAI_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar OPENAI_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: model || "gpt-5.6-luna",
+              messages,
+              stream: false
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || data?.error || `Error OpenAI HTTP ${res.status}` }, res.status);
+          }
+
+          return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
+        }
+
+        // --- PROVEEDOR: CLAUDE (ANTHROPIC) ---
+        if (provider === "claude") {
+          const apiKey = env.ANTHROPIC_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar ANTHROPIC_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01"
+            },
+            body: JSON.stringify({
+              model: model || "claude-3-5-sonnet-20241022",
+              max_tokens: 4096,
+              system: systemInstruction || undefined,
+              messages: history.concat(prompt ? [{ role: "user", content: prompt }] : [])
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || `Error Claude HTTP ${res.status}` }, res.status);
+          }
+
+          return jsonResponse({ reply: data?.content?.[0]?.text || "" });
+        }
+
+        // --- PROVEEDOR: GEMINI ---
+        if (provider === "gemini") {
+          const apiKey = env.GEMINI_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar GEMINI_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const targetModel = model || "gemini-2.0-flash";
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
+              })
+            }
+          );
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || `Error Gemini HTTP ${res.status}` }, res.status);
+          }
+
+          const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          return jsonResponse({ reply: replyText });
+        }
+
+        // --- PROVEEDOR: ALIBABA (QWEN) ---
+        if (provider === "alibaba") {
+          const apiKey = env.ALIBABA_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar ALIBABA_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const res = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: model || "qwen-max",
+              messages
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || `Error Alibaba HTTP ${res.status}` }, res.status);
+          }
+
+          return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
+        }
+
+        // --- PROVEEDOR: NVIDIA ---
+        if (provider === "nvidia") {
+          const apiKey = env.NVIDIA_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar NVIDIA_API_KEY en las variables del Worker." }, 500);
+          }
+
+          const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: model || "meta/llama3-70b-instruct",
+              messages,
+              temperature: 0.5,
+              top_p: 1,
+              max_tokens: 1024
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || `Error Nvidia HTTP ${res.status}` }, res.status);
+          }
+
+          return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
+        }
+
+        return jsonResponse({ error: `Proveedor no soportado: ${provider}` }, 400);
+      } catch (err) {
+        return jsonResponse({ error: err.message || "Error interno en Worker" }, 500);
       }
-
-      return env.ASSETS.fetch(request);
-    } catch (error) {
-      console.error(error);
-
-      return responseWithCors(
-        json(
-          {
-            ok: false,
-            error:
-              error?.message ||
-              "Error interno del Worker."
-          },
-          500
-        ),
-        request
-      );
     }
+
+    // ========================================================================
+    // 2. ENDPOINT DE FÁBRICA / VPS / MODAL (/api/factory)
+    // ========================================================================
+    if (url.pathname === "/api/factory" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const targetUrl = env.MODAL_WEBHOOK_URL || env.VPS_URL;
+
+        if (!targetUrl) {
+          return jsonResponse({ error: "No hay MODAL_WEBHOOK_URL ni VPS_URL configurados en el Worker." }, 500);
+        }
+
+        const response = await fetch(targetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        const data = await response.json();
+        return jsonResponse(data, response.status);
+      } catch (err) {
+        return jsonResponse({ error: `Fallo en Fábrica: ${err.message}` }, 500);
+      }
+    }
+
+    // ========================================================================
+    // 3. ENDPOINT DE RENDER (/api/render)
+    // ========================================================================
+    if (url.pathname === "/api/render" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const vpsUrl = env.VPS_URL;
+
+        if (!vpsUrl) {
+          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare." }, 500);
+        }
+
+        const response = await fetch(`${vpsUrl}/render`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        const data = await response.json();
+        return jsonResponse(data, response.status);
+      } catch (err) {
+        return jsonResponse({ error: `Fallo en Render: ${err.message}` }, 500);
+      }
+    }
+
+    // ========================================================================
+    // 4. SERVIR ASSETS ESTÁTICOS (Vite Build)
+    // ========================================================================
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+
+    return new Response("Not Found", { status: 404 });
   }
 };
