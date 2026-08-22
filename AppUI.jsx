@@ -195,23 +195,29 @@ export default function AppUI() {
   }, []);
 
   useEffect(() => {
-    if (chats.length > 0) {
-      localStorage.setItem("tupia_chats", JSON.stringify(chats));
-    }
+    try {
+      if (chats.length > 0) {
+        localStorage.setItem("tupia_chats", JSON.stringify(chats));
+      }
 
-    if (currentChatId) {
-      localStorage.setItem("tupia_current_chat", currentChatId);
+      if (currentChatId) {
+        localStorage.setItem("tupia_current_chat", currentChatId);
+      }
+    } catch (error) {
+      console.warn("⚠️ No se pudo guardar el historial en LocalStorage. Posible límite de memoria alcanzado.", error);
     }
   }, [chats, currentChatId]);
 
   useEffect(() => {
-    if (
-      activeTab === "chat" &&
-      chatBottomRef.current
-    ) {
-      chatBottomRef.current.scrollIntoView({
-        behavior: "smooth"
-      });
+    if (activeTab === "chat" && chatBottomRef.current) {
+      try {
+        chatBottomRef.current.scrollIntoView({
+          behavior: "smooth"
+        });
+      } catch (error) {
+        // Fallback seguro si el navegador móvil no soporta smooth scrolling
+        chatBottomRef.current.scrollIntoView();
+      }
     }
   }, [chats, currentChatId, activeTab]);
 
@@ -1003,11 +1009,13 @@ export default function AppUI() {
 
                       <button
                         type="button"
-                        onClick={() =>
-                          navigator.clipboard.writeText(
-                            message.content
-                          )
-                        }
+                        onClick={() => {
+                          try {
+                            navigator.clipboard.writeText(message.content);
+                          } catch (err) {
+                            alert("Copiado manual requerido en este navegador.");
+                          }
+                        }}
                         className="rounded bg-gray-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 transition-colors hover:text-white"
                       >
                         📋 Copiar Todo
