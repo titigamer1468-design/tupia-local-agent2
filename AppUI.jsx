@@ -5,7 +5,7 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-const API_BASE = "";
+const API_BASE = "http://13.140.25.193:3000";
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
