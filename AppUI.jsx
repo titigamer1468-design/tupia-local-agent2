@@ -5,7 +5,8 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-const API_BASE = "http://13.140.25.193:3000";
+// AppUI.jsx - CORRECCIÓN LÍNEA 8
+const API_BASE = ""; 
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
