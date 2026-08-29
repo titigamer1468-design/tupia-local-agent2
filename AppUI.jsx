@@ -7,7 +7,7 @@ import { renderVideo } from "./VideoEngine.js";
 
 // AppUI.jsx - INTEGRACIÓN CON n8n 🏭
 const API_BASE = "https://vbkaf-13-140-25-193.run.pinggy-free.link";
-const N8N_WEBHOOK = "http://13.140.25.193:5678/webhook/fabrica-modelslab"; // Tu nueva Fábrica
+const N8N_WEBHOOK = "http://13.140.25.193:5678/webhook-test/fabrica-modelslab"; // Tu nueva Fábrica
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
