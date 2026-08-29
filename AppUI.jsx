@@ -6,8 +6,7 @@ import {
 import { renderVideo } from "./VideoEngine.js";
 
 // AppUI.jsx - CORRECCIÓN LÍNEA 8
-const API_BASE = ""; 
-
+const API_BASE = "http://13.140.25.193";
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
