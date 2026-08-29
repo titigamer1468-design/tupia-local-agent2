@@ -5,9 +5,9 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-// AppUI.jsx - INTEGRACIÓN CON n8n 🏭
+// AppUI.jsx - INTEGRACIÓN DIRECTA CON n8n 🏭
 const API_BASE = "https://tupia-local-agent1.titigamer1468.workers.dev";
-const N8N_WEBHOOK = "https://breeding-annex-requested-anti.trycloudflare.com"; // Tu nueva Fábrica por LocalTunnel
+const N8N_WEBHOOK = "http://13.140.25.193:5678/webhook/fabrica-modelslab"; // O tu túnel activo si usas HTTPS
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
