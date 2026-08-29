@@ -7,7 +7,7 @@ import { renderVideo } from "./VideoEngine.js";
 
 // AppUI.jsx - INTEGRACIÓN CON n8n 🏭
 const API_BASE = "https://vbkaf-13-140-25-193.run.pinggy-free.link";
-const N8N_WEBHOOK = "http://13.140.25.193:5678/webhook-test/fabrica-modelslab"; // Tu nueva Fábrica
+const N8N_WEBHOOK = "https://mitupia.loca.lt/webhook-test/fabrica-modelslab"; // Tu nueva Fábrica por LocalTunnel
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
@@ -381,7 +381,8 @@ export default function AppUI() {
     const response = await fetch(N8N_WEBHOOK, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Bypass-Tunnel-Reminder": "true" // 🛡️ EL PASE VIP PARA SALTAR LA PANTALLA
       },
       body: JSON.stringify({
         prompt: promptTexto,

@@ -1,0 +1,193 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fabrica-modelslab",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Recibir Prompt",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.tipo }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "imagen"
+            },
+            {
+              "value2": "video",
+              "output": 1
+            }
+          ]
+        }
+      },
+      "name": "Imagen o Video?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://modelslab.com/api/v6/images/text2img",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"key\": \"AQUI_TU_API_KEY_DE_MODELSLAB\",\n  \"prompt\": \"{{ $json.body.prompt }}\",\n  \"negative_prompt\": \"bad quality, blurry\",\n  \"width\": 512,\n  \"height\": 512\n}",
+        "options": {}
+      },
+      "name": "Generar Imagen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://modelslab.com/api/v6/video/text2video",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"key\": \"AQUI_TU_API_KEY_DE_MODELSLAB\",\n  \"prompt\": \"{{ $json.body.prompt }}\"\n}",
+        "options": {}
+      },
+      "name": "Generar Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 420]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.output[0] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Descargar Archivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8c35d94e-28fb-4d1a-96e0-27ff7e77d07f",
+              "name": "nombre_archivo",
+              "value": "={{ $('Recibir Prompt').item.json.body.numero_orden }}_escena.{{ $('Recibir Prompt').item.json.body.tipo === 'imagen' ? 'png' : 'mp4' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Nombrar Archivo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "myDrive"
+        },
+        "fileName": "={{ $json.nombre_archivo }}",
+        "binaryData": true,
+        "options": {}
+      },
+      "name": "Subir a Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1160, 300]
+    }
+  ],
+  "connections": {
+    "Recibir Prompt": {
+      "main": [
+        [
+          {
+            "node": "Imagen o Video?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Imagen o Video?": {
+      "main": [
+        [
+          {
+            "node": "Generar Imagen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Imagen": {
+      "main": [
+        [
+          {
+            "node": "Descargar Archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Video": {
+      "main": [
+        [
+          {
+            "node": "Descargar Archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar Archivo": {
+      "main": [
+        [
+          {
+            "node": "Nombrar Archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nombrar Archivo": {
+      "main": [
+        [
+          {
+            "node": "Subir a Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
+}
