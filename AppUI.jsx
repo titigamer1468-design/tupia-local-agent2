@@ -5,9 +5,8 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-// AppUI.jsx - INTEGRACIÓN DIRECTA CON n8n 🏭
+// AppUI.jsx - INTEGRACIÓN DIRECTA CON EL NAVEGADOR Y AUTO-ESPERA 💻
 const API_BASE = "https://tupia-local-agent1.titigamer1468.workers.dev";
-const N8N_WEBHOOK = "http://13.140.25.193:5678/webhook/fabrica-modelslab"; // O tu túnel activo si usas HTTPS
 
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
@@ -136,7 +135,7 @@ export default function AppUI() {
 
   // FÁBRICA
   const [factoryMode, setFactoryMode] = useState("image");
-  const [factoryEngineMode, setFactoryEngineMode] = useState("vps");
+  const [factoryEngineMode, setFactoryEngineMode] = useState("navegador");
   const [batchInput, setBatchInput] = useState("");
   const [factoryImage, setFactoryImage] = useState(null);
 
@@ -339,14 +338,6 @@ export default function AppUI() {
     }
   };
 
-  const parseWorkflow = (value) => {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
-  };
-
   const loadJSZip = async () => {
     if (window.JSZip) {
       return window.JSZip;
@@ -373,37 +364,67 @@ export default function AppUI() {
     return window.JSZip;
   };
 
-  // 🔴 CONEXIÓN BLINDADA A n8n WEBHOOK
-  const processFactoryTask = async (prompt, index) => {
+  // 🔴 CONEXIÓN BLINDADA CON POLLING AL NAVEGADOR
+  const processBrowserTask = async (prompt, index) => {
     const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
-    const numeroFormateado = String(index + 1).padStart(2, '0'); // Convierte "1" en "01"
 
-    const response = await fetch(N8N_WEBHOOK, {
+    // 1. Mandar a hacer el video a Cloudflare Worker
+    const response = await fetch(`${API_BASE}/api/ai`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Bypass-Tunnel-Reminder": "true" // 🛡️ EL PASE VIP PARA SALTAR LA PANTALLA
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        prompt: promptTexto,
-        tipo: factoryMode === "image" ? "imagen" : "video",
-        numero_orden: numeroFormateado
+        activeModel: "byteplus",
+        provider: "byteplus",
+        prompt: promptTexto
       })
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Error en n8n: ${response.status} - ${errText}`);
+    const data = await readJsonResponse(response);
+    const reply = data.reply || data.content || "";
+
+    // Si no es un video o no devuelve el ID, retornamos el texto crudo
+    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/);
+    if (!matchId) {
+      return { mensaje: "Respuesta directa recibida", detalle: reply };
     }
 
-    // n8n puede devolver JSON o texto dependiendo del último nodo
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      return await response.json();
-    } else {
-      const text = await response.text();
-      return { mensaje: "Procesado por n8n", detalle: text };
+    const taskId = matchId[0];
+
+    // 2. Bucle de espera (Preguntamos cada 40 segundos, máximo 5 veces)
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      setBatchStatus(`⏳ Tarea ${index + 1}: ByteDance procesando... (Espera ${attempt}/5)`);
+      
+      // Esperar 40 segundos antes de volver a preguntar
+      await new Promise((resolve) => setTimeout(resolve, 40000));
+
+      const checkRes = await fetch(`${API_BASE}/api/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activeModel: "byteplus",
+          provider: "byteplus",
+          prompt: taskId
+        })
+      });
+
+      const checkData = await readJsonResponse(checkRes);
+      const checkReply = checkData.reply || "";
+
+      // Si ya hay un link de video en la respuesta
+      const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
+      if (urlMatch) {
+        let videoUrl = urlMatch[0];
+        if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
+        
+        return { 
+            mensaje: "✅ Video renderizado con éxito", 
+            video_url: videoUrl,
+            taskId: taskId
+        };
+      }
     }
+
+    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
   };
 
   const handleBatchGeneration = async () => {
@@ -481,86 +502,56 @@ export default function AppUI() {
       }
 
       setBatchStatus(
-        `📱 Despachando tareas a n8n [${factoryMode.toUpperCase()}]...`
+        `📱 Procesando lote 1x1 [Auto-Espera]... No cierres esta pestaña.`
       );
 
       const JSZip = await loadJSZip();
       const zip = new JSZip();
       const errors = [];
-      let report = `=== REPORTE DE TAREAS n8n (${factoryMode.toUpperCase()}) ===\n\n`;
+      let report = `=== REPORTE DE SÚPER FÁBRICA ===\n\n`;
 
       for (let index = 0; index < promptList.length; index += 1) {
         const prompt = promptList[index];
         const taskNumber = index + 1;
 
         setBatchStatus(
-          `Procesando orden ${taskNumber} de ${promptList.length} en n8n...`
+          `Iniciando orden ${taskNumber} de ${promptList.length}...`
         );
 
         let success = false;
         let lastError = "";
 
-        for (let attempt = 1; attempt <= 3 && !success; attempt += 1) {
-          try {
-            const result = await processFactoryTask(prompt, index);
+        try {
+            const result = await processBrowserTask(prompt, index);
 
-            if (!result || typeof result !== "object") {
-              throw new Error("La fábrica n8n devolvió una respuesta inválida.");
-            }
-
-            const responseForReport = { ...result };
-            const isVideo = factoryMode === "video";
-            const targetFolder = isVideo ? "Videos_Generados" : "Imagenes_Generadas";
-
-            // Si por algún milagro n8n devuelve el base64, lo zipeamos.
-            if (result.archivo_base64) {
-              const extension = result.extension || (isVideo ? "mp4" : "png");
-
-              zip
-                .folder(targetFolder)
-                .file(
-                  `Resultado_${taskNumber}.${extension}`,
-                  result.archivo_base64,
-                  { base64: true }
-                );
-
-              responseForReport.archivo_base64 =
-                `✅ Archivo .${extension.toUpperCase()} guardado en el ZIP.`;
-            } else if (result.imagen_base64) {
-              zip
-                .folder(targetFolder)
-                .file(
-                  `Resultado_${taskNumber}.png`,
-                  result.imagen_base64,
-                  { base64: true }
-                );
-
-              responseForReport.imagen_base64 =
-                "✅ Imagen PNG guardada en el ZIP.";
+            if (result.video_url) {
+                try {
+                    setBatchStatus(`📥 Tarea ${taskNumber}: Descargando MP4 al ZIP...`);
+                    const vidRes = await fetch(result.video_url);
+                    const vidBlob = await vidRes.blob();
+                    
+                    const reader = new FileReader();
+                    const base64Data = await new Promise((resolve) => {
+                        reader.onload = () => resolve(reader.result);
+                        reader.readAsDataURL(vidBlob);
+                    });
+                    
+                    const cleanB64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
+                    zip.folder("Videos_Generados").file(`Video_${taskNumber}.mp4`, cleanB64, { base64: true });
+                    
+                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Empaquetado en el ZIP.\nURL Original: ${result.video_url}\n\n`;
+                } catch (corsErr) {
+                    // Fallback de seguridad si ByteDance bloquea la descarga directa
+                    zip.folder("Videos_Enlaces").file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
+                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Bloqueado por CORS. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
+                }
             } else {
-              // Si no, asumimos que n8n lo mandó a Google Drive con éxito
-              responseForReport.estado = "✅ Tarea procesada y subida a Drive por n8n.";
+                report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}\nRespuesta: ${JSON.stringify(result)}\n\n`;
             }
-
-            report +=
-              `Tarea ${taskNumber}:\n` +
-              `Orden: ${String(prompt).slice(0, 120)}\n` +
-              `Respuesta: ${JSON.stringify(responseForReport)}\n\n`;
-
+            
             success = true;
-          } catch (error) {
+        } catch (error) {
             lastError = error.message || "Error desconocido";
-
-            if (attempt < 3) {
-              setBatchStatus(
-                `🔄 Reintentando envío a n8n (${attempt}/3)...`
-              );
-
-              await new Promise((resolve) => {
-                setTimeout(resolve, 3000);
-              });
-            }
-          }
         }
 
         if (!success) {
@@ -570,17 +561,11 @@ export default function AppUI() {
             .folder("Errores")
             .file(
               `ERROR_${taskNumber}.txt`,
-              `Error procesando la tarea en n8n.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`
+              `Error procesando la tarea.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`
             );
         }
 
         setBatchProgress(taskNumber);
-
-        if (index < promptList.length - 1) {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 1000); // Pausa entre peticiones para no saturar n8n
-          });
-        }
       }
 
       zip.file("Reporte_Fábrica.txt", report);
@@ -596,14 +581,14 @@ export default function AppUI() {
           `⚠️ Lote finalizado con ${errors.length} error(es). Revisa la bitácora ZIP.`
         );
       } else {
-        setBatchStatus("✅ Lote enviado exitosamente a tu Drive.");
+        setBatchStatus("✅ Lote procesado exitosamente.");
       }
 
-      addLog("[OK] Lote procesado por n8n.");
+      addLog("[OK] Lote auto-procesado por el navegador.");
     } catch (error) {
       console.error(error);
       setBatchStatus(`❌ Error de conexión: ${error.message}`);
-      addLog(`[ERROR] Webhook: ${error.message}`);
+      addLog(`[ERROR] Fábrica: ${error.message}`);
     } finally {
       setIsBatching(false);
     }
@@ -1075,8 +1060,8 @@ export default function AppUI() {
                 }
                 className="rounded-lg border border-gray-700 bg-gray-900 p-1 text-xs font-normal text-white"
               >
-                <option value="celular">
-                  📱 Procesar lote directo a n8n
+                <option value="navegador">
+                  💻 Procesar 1x1 en el navegador (Auto-Espera)
                 </option>
                 <option value="vps">
                   ☁️ Cloudflare / VPS 24/7
@@ -1163,7 +1148,7 @@ export default function AppUI() {
               <p className="mt-3 text-xs text-gray-400">
                 {factoryEngineMode === "vps"
                   ? "☁️ El lote se envía al Worker de Cloudflare."
-                  : "📱 El lote se envía 1x1 directamente a tu Webhook local de n8n."}
+                  : "💻 El lote se procesará uno por uno. Deja esta pestaña abierta hasta que termine."}
               </p>
             </div>
 
@@ -1173,7 +1158,7 @@ export default function AppUI() {
                   {batchStatus}
                 </p>
 
-                {factoryEngineMode === "celular" && (
+                {factoryEngineMode === "navegador" && (
                   <>
                     <div className="mb-2 h-4 w-full overflow-hidden rounded-full bg-gray-800">
                       <div
@@ -1192,7 +1177,7 @@ export default function AppUI() {
                     </div>
 
                     <p className="text-xs text-gray-500">
-                      {batchProgress} de {batchTotal} tareas despachadas a n8n
+                      {batchProgress} de {batchTotal} tareas completadas
                     </p>
                   </>
                 )}
@@ -1211,7 +1196,7 @@ export default function AppUI() {
               >
                 {factoryEngineMode === "vps"
                   ? "🚀 Enviar lote a Cloudflare"
-                  : "🚀 Despachar Lote a n8n Local"}
+                  : "🚀 Procesar Lote en Navegador"}
               </button>
             )}
 
@@ -1232,19 +1217,19 @@ export default function AppUI() {
             {zipUrl && (
               <div className="rounded-xl border border-green-500 bg-gray-900 p-4 text-center shadow-2xl shadow-green-500/20">
                 <h3 className="mb-3 text-base font-bold text-green-400">
-                  ✅ Bitácora ZIP generada
+                  ✅ Archivo ZIP generado
                 </h3>
 
                 <p className="mb-4 text-xs text-gray-400">
-                  Tus archivos ya deberían estar en Google Drive. El ZIP contiene el reporte de n8n.
+                  Tus resultados están listos. Descarga tu archivo a continuación.
                 </p>
 
                 <a
                   href={zipUrl}
-                  download={`Reporte_n8n_${factoryMode}_${Date.now()}.zip`}
+                  download={`Resultados_${factoryMode}_${Date.now()}.zip`}
                   className="block w-full rounded-xl bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500"
                 >
-                  📥 Descargar Reporte ZIP
+                  📥 Descargar Archivo ZIP
                 </a>
               </div>
             )}
