@@ -140,13 +140,12 @@ export default function AppUI() {
   const [factoryImage, setFactoryImage] = useState(null);
 
   const [isBatching, setIsBatching] = useState(false);
-  const [batchStatus, setBatchStatus] = useState(
-    "Esperando instrucciones..."
-  );
+  const [batchStatus, setBatchStatus] = useState("Esperando instrucciones...");
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
 
+  // 📦 ESTADOS PARA TANDAS DE 6
   const [lotesPendientes, setLotesPendientes] = useState([]);
   const [loteActualIndex, setLoteActualIndex] = useState(0);
 
@@ -208,7 +207,7 @@ export default function AppUI() {
         localStorage.setItem("tupia_current_chat", currentChatId);
       }
     } catch (error) {
-      console.warn("⚠️ No se pudo guardar el historial en LocalStorage. Posible límite de memoria alcanzado.", error);
+      console.warn("⚠️ No se pudo guardar el historial en LocalStorage.", error);
     }
   }, [chats, currentChatId]);
 
@@ -240,7 +239,6 @@ export default function AppUI() {
 
   const createNewChat = () => {
     const newChat = getInitialChat();
-
     setChats((previous) => [newChat, ...previous]);
     setCurrentChatId(newChat.id);
     setIsSidebarOpen(false);
@@ -282,7 +280,6 @@ export default function AppUI() {
       for (const file of files) {
         if (file.type.startsWith("image/")) {
           const data = await fileToBase64(file);
-
           newAttachments.push({
             type: "image",
             name: file.name,
@@ -291,7 +288,6 @@ export default function AppUI() {
           });
         } else {
           const text = await file.text();
-
           newAttachments.push({
             type: "text",
             name: file.name,
@@ -312,7 +308,6 @@ export default function AppUI() {
 
   const handleStudioMedia = (event) => {
     const files = Array.from(event.target.files || []);
-
     const newFiles = files.map((file) => ({
       file,
       name: file.name,
@@ -328,10 +323,7 @@ export default function AppUI() {
 
   const handleFactoryImageChange = async (event) => {
     const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
+    if (!file) return;
 
     try {
       const base64 = await fileToBase64(file);
@@ -348,15 +340,10 @@ export default function AppUI() {
 
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-
-      script.src =
-        "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
       script.async = true;
-
       script.onload = resolve;
-      script.onerror = () =>
-        reject(new Error("No se pudo cargar el motor ZIP."));
-
+      script.onerror = () => reject(new Error("No se pudo cargar el motor ZIP."));
       document.head.appendChild(script);
     });
 
@@ -373,21 +360,10 @@ export default function AppUI() {
 
     try {
       const parsedInput = JSON.parse(batchInput);
-
       if (Array.isArray(parsedInput)) {
         promptList = parsedInput
-          .map((item) => {
-            if (typeof item === "object" && item !== null) {
-              return JSON.stringify(item);
-            }
-            return String(item);
-          })
+          .map((item) => (typeof item === "object" && item !== null ? JSON.stringify(item) : String(item)))
           .filter(Boolean);
-      } else if (
-        typeof parsedInput === "object" &&
-        parsedInput !== null
-      ) {
-        promptList = [JSON.stringify(parsedInput)];
       } else {
         promptList = [String(parsedInput)];
       }
@@ -451,7 +427,7 @@ export default function AppUI() {
     addLog(`[OK] Fábrica cargada con ${promptList.length} prompts en ${chunks.length} tandas.`);
   };
 
-  // 🔴 CONEXIÓN BLINDADA CON POLLING AL NAVEGADOR
+  // 🔴 POLLING INDIVIDUAL PARA CADA TAREA
   const processBrowserTask = async (prompt, index) => {
     const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
 
@@ -475,7 +451,6 @@ export default function AppUI() {
 
     const taskId = matchId[0];
 
-    // Bucle de espera (Preguntamos cada 40 segundos, máximo 6 veces)
     for (let attempt = 1; attempt <= 6; attempt++) {
       setBatchStatus(`⏳ Video ${index + 1}/6: Renderizando en ByteDance... (Intento ${attempt}/6)`);
       
@@ -507,7 +482,7 @@ export default function AppUI() {
       }
     }
 
-    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
+    throw new Error(`El video ${taskId} excedió el tiempo de espera.`);
   };
 
   // 🚀 EJECUTAR LA TANDA ACTUAL DE 6
@@ -548,7 +523,6 @@ export default function AppUI() {
                     });
                     
                     const vidBlob = await vidRes.blob();
-                    
                     const reader = new FileReader();
                     const base64Data = await new Promise((resolve) => {
                         reader.onload = () => resolve(reader.result);
@@ -558,13 +532,13 @@ export default function AppUI() {
                     const cleanB64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
                     zip.folder(`Tanda_${loteActualIndex + 1}_Videos`).file(`Video_${taskNumber}.mp4`, cleanB64, { base64: true });
                     
-                    report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Empaquetado en el ZIP.\nURL Original: ${result.video_url}\n\n`;
+                    report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Guardado en ZIP.\n\n`;
                 } catch (corsErr) {
-                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
-                    report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Error al empaquetar por CORS. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace:\n\n${result.video_url}`);
+                    report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Guardado por enlace directo.\n\n`;
                 }
             } else {
-                report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}\nRespuesta: ${JSON.stringify(result)}\n\n`;
+                report += `Video ${taskNumber}:\nRespuesta: ${JSON.stringify(result)}\n\n`;
             }
             
             success = true;
@@ -574,30 +548,25 @@ export default function AppUI() {
 
         if (!success) {
           errors.push(`Video ${taskNumber}: ${lastError}`);
-          zip.folder("Errores").file(`ERROR_Video_${taskNumber}.txt`, `Error procesando la tarea.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`);
+          zip.folder("Errores").file(`ERROR_Video_${taskNumber}.txt`, `Error:\n${lastError}`);
         }
 
         setBatchProgress(taskNumber);
       }
 
-      zip.file(`Reporte_Tanda_${loteActualIndex + 1}.txt`, report);
+      zip.file("Reporte_Tanda.txt", report);
 
       setBatchStatus("📦 Empaquetando ZIP de la tanda...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const generatedUrl = URL.createObjectURL(zipBlob);
 
       setZipUrl(generatedUrl);
+      setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} completada con éxito!`);
+      addLog(`[OK] Tanda ${loteActualIndex + 1} procesada.`);
 
-      if (errors.length > 0) {
-        setBatchStatus(`⚠️ Tanda completada con ${errors.length} error(es).`);
-      } else {
-        setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} procesada exitosamente!`);
-      }
-
-      addLog(`[OK] Tanda ${loteActualIndex + 1} auto-procesada.`);
     } catch (error) {
       console.error(error);
-      setBatchStatus(`❌ Error de conexión: ${error.message}`);
+      setBatchStatus(`❌ Error en la tanda: ${error.message}`);
       addLog(`[ERROR] Fábrica: ${error.message}`);
     } finally {
       setIsBatching(false);
@@ -1061,7 +1030,7 @@ export default function AppUI() {
         {activeTab === "factory" && (
           <div className="space-y-6 p-6">
             <h2 className="flex items-center justify-between border-b border-gray-800 pb-2 text-xl font-bold text-cyan-400">
-              <span>🏭 Súper Fábrica</span>
+              <span>🏭 Súper Fábrica (Tandas)</span>
 
               <select
                 value={factoryEngineMode}
@@ -1107,7 +1076,7 @@ export default function AppUI() {
 
             <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
               <label className="mb-2 block text-sm font-bold text-gray-300">
-                Instrucciones o JSON para la fábrica
+                Pega tus 120 prompts aquí:
               </label>
 
               <textarea
@@ -1241,7 +1210,7 @@ export default function AppUI() {
                         setZipUrl(null);
                         setBatchStatus("Esperando instrucciones...");
                     }}
-                    className="mt-3 w-full text-xs font-bold text-gray-500 hover:text-white"
+                    className="mt-4 w-full text-xs font-bold text-gray-500 hover:text-white"
                   >
                     Cancelar y cargar nuevos prompts
                   </button>
