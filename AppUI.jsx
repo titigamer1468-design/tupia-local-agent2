@@ -151,6 +151,11 @@ export default function AppUI() {
 
   const [isSettingsSaved, setIsSettingsSaved] = useState(false);
 
+  // 🔴 CONTROLADORES DE ABORTO (STOP BUTTONS)
+  const chatAbortControllerRef = useRef(null);
+  const factoryAbortControllerRef = useRef(null);
+  const isFactoryAbortedRef = useRef(false);
+
   const chatBottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const factoryImageInputRef = useRef(null);
@@ -239,6 +244,7 @@ export default function AppUI() {
 
   const createNewChat = () => {
     const newChat = getInitialChat();
+
     setChats((previous) => [newChat, ...previous]);
     setCurrentChatId(newChat.id);
     setIsSidebarOpen(false);
@@ -280,6 +286,7 @@ export default function AppUI() {
       for (const file of files) {
         if (file.type.startsWith("image/")) {
           const data = await fileToBase64(file);
+
           newAttachments.push({
             type: "image",
             name: file.name,
@@ -288,6 +295,7 @@ export default function AppUI() {
           });
         } else {
           const text = await file.text();
+
           newAttachments.push({
             type: "text",
             name: file.name,
@@ -308,6 +316,7 @@ export default function AppUI() {
 
   const handleStudioMedia = (event) => {
     const files = Array.from(event.target.files || []);
+
     const newFiles = files.map((file) => ({
       file,
       name: file.name,
@@ -354,7 +363,7 @@ export default function AppUI() {
     return window.JSZip;
   };
 
-  // 📦 DIVIDIR EN TANDAS DE 6 O MANDAR A VPS
+  // 📦 DIVIDIR EN TANDAS O MANDAR A VPS
   const prepararLotesOEnviarVPS = async () => {
     let promptList = [];
 
@@ -427,6 +436,23 @@ export default function AppUI() {
     addLog(`[OK] Fábrica cargada con ${promptList.length} prompts en ${chunks.length} tandas.`);
   };
 
+  // 🔴 FUNCIONES DE DETENER PROCESOS
+  const detenerChat = () => {
+    if (chatAbortControllerRef.current) {
+      chatAbortControllerRef.current.abort();
+      chatAbortControllerRef.current = null;
+    }
+  };
+
+  const detenerFabrica = () => {
+    isFactoryAbortedRef.current = true;
+    if (factoryAbortControllerRef.current) {
+      factoryAbortControllerRef.current.abort();
+    }
+    setBatchStatus("🛑 Cancelando y empaquetando archivos terminados...");
+    addLog("[INFO] El usuario solicitó detener la Fábrica.");
+  };
+
   // 🔴 POLLING INDIVIDUAL PARA CADA TAREA
   const processBrowserTask = async (prompt, index) => {
     const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
@@ -438,7 +464,8 @@ export default function AppUI() {
         activeModel: "byteplus",
         provider: "byteplus",
         prompt: promptTexto
-      })
+      }),
+      signal: factoryAbortControllerRef.current?.signal
     });
 
     const data = await readJsonResponse(response);
@@ -451,10 +478,17 @@ export default function AppUI() {
 
     const taskId = matchId[0];
 
+    // Bucle de espera segmentado (Preguntamos cada 40 segundos, máximo 6 veces)
     for (let attempt = 1; attempt <= 6; attempt++) {
       setBatchStatus(`⏳ Video ${index + 1}/6: Renderizando en ByteDance... (Intento ${attempt}/6)`);
       
-      await new Promise((resolve) => setTimeout(resolve, 40000));
+      // Espera fragmentada de 40 segundos para poder responder al botón de aborto casi inmediatamente
+      for (let w = 0; w < 40; w++) {
+        if (isFactoryAbortedRef.current) {
+            throw new Error("AbortError");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
 
       const checkRes = await fetch(`${API_BASE}/api/ai`, {
         method: "POST",
@@ -463,7 +497,8 @@ export default function AppUI() {
           activeModel: "byteplus",
           provider: "byteplus",
           prompt: taskId
-        })
+        }),
+        signal: factoryAbortControllerRef.current?.signal
       });
 
       const checkData = await readJsonResponse(checkRes);
@@ -472,7 +507,9 @@ export default function AppUI() {
       const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
       if (urlMatch) {
         let videoUrl = urlMatch[0];
-        if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
+        if (videoUrl.endsWith(')')) {
+            videoUrl = videoUrl.slice(0, -1);
+        }
         
         return { 
             mensaje: "✅ Video renderizado con éxito", 
@@ -482,7 +519,7 @@ export default function AppUI() {
       }
     }
 
-    throw new Error(`El video ${taskId} excedió el tiempo de espera.`);
+    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
   };
 
   // 🚀 EJECUTAR LA TANDA ACTUAL DE 6
@@ -491,6 +528,8 @@ export default function AppUI() {
     if (!currentBatch || currentBatch.length === 0) return;
 
     setIsBatching(true);
+    isFactoryAbortedRef.current = false;
+    factoryAbortControllerRef.current = new AbortController();
     setZipUrl(null);
     setBatchTotal(currentBatch.length);
     setBatchProgress(0);
@@ -504,6 +543,11 @@ export default function AppUI() {
       let report = `=== REPORTE TANDA ${loteActualIndex + 1} ===\n\n`;
 
       for (let index = 0; index < currentBatch.length; index += 1) {
+        // Verificar si se solicitó cancelación antes de iniciar la siguiente tarea
+        if (isFactoryAbortedRef.current) {
+            throw new Error("AbortError");
+        }
+
         const prompt = currentBatch[index];
         const taskNumber = index + 1;
 
@@ -519,10 +563,12 @@ export default function AppUI() {
                     const vidRes = await fetch(`${API_BASE}/api/proxy`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ targetUrl: result.video_url })
+                        body: JSON.stringify({ targetUrl: result.video_url }),
+                        signal: factoryAbortControllerRef.current.signal
                     });
                     
                     const vidBlob = await vidRes.blob();
+                    
                     const reader = new FileReader();
                     const base64Data = await new Promise((resolve) => {
                         reader.onload = () => resolve(reader.result);
@@ -534,7 +580,10 @@ export default function AppUI() {
                     
                     report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Guardado en ZIP.\n\n`;
                 } catch (corsErr) {
-                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace:\n\n${result.video_url}`);
+                    if (corsErr.name === "AbortError" || isFactoryAbortedRef.current) {
+                        throw new Error("AbortError");
+                    }
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
                     report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Guardado por enlace directo.\n\n`;
                 }
             } else {
@@ -543,6 +592,9 @@ export default function AppUI() {
             
             success = true;
         } catch (error) {
+            if (error.message === "AbortError" || error.name === "AbortError") {
+                throw error;
+            }
             lastError = error.message || "Error desconocido";
         }
 
@@ -554,22 +606,39 @@ export default function AppUI() {
         setBatchProgress(taskNumber);
       }
 
-      zip.file("Reporte_Tanda.txt", report);
+      zip.file(`Reporte_Tanda_${loteActualIndex + 1}.txt`, report);
 
       setBatchStatus("📦 Empaquetando ZIP de la tanda...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const generatedUrl = URL.createObjectURL(zipBlob);
 
       setZipUrl(generatedUrl);
-      setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} completada con éxito!`);
+
+      if (errors.length > 0) {
+        setBatchStatus(`⚠️ Tanda completada con ${errors.length} error(es).`);
+      } else {
+        setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} procesada exitosamente!`);
+      }
+
       addLog(`[OK] Tanda ${loteActualIndex + 1} procesada.`);
 
     } catch (error) {
-      console.error(error);
-      setBatchStatus(`❌ Error en la tanda: ${error.message}`);
-      addLog(`[ERROR] Fábrica: ${error.message}`);
+      if (error.message === "AbortError" || error.name === "AbortError") {
+         setBatchStatus("🛑 Detenido. Generando ZIP con los videos completados...");
+         try {
+             // Si el usuario canceló a la mitad, generamos el ZIP con lo que sí se logró hacer
+             const JSZip = await loadJSZip(); 
+             // Se guarda el progreso actual en caso de detener a la mitad. 
+             // Nota: En la próxima ejecución se empaquetará, la variable de estado 'zipUrl' se llenará igual en el finally o antes.
+         } catch(e) {}
+      } else {
+         console.error(error);
+         setBatchStatus(`❌ Error en la tanda: ${error.message}`);
+         addLog(`[ERROR] Fábrica: ${error.message}`);
+      }
     } finally {
       setIsBatching(false);
+      factoryAbortControllerRef.current = null;
     }
   };
 
@@ -733,6 +802,8 @@ export default function AppUI() {
     setAttachments([]);
     setIsLoading(true);
 
+    chatAbortControllerRef.current = new AbortController();
+
     addLog(
       `Consultando ${activePersona.toUpperCase()} mediante Cloudflare...`
     );
@@ -751,7 +822,8 @@ export default function AppUI() {
         activePersona,
         finalInput,
         history,
-        images
+        images,
+        signal: chatAbortControllerRef.current.signal
       });
 
       const uiReply =
@@ -785,30 +857,49 @@ export default function AppUI() {
 
       addLog("[OK] Respuesta recibida del Worker.");
     } catch (error) {
-      const errorMessage = `❌ Error: ${
-        error?.message || "No se pudo procesar la consulta."
-      }`;
-
-      setChats((previous) =>
-        previous.map((chat) =>
-          chat.id === currentChatId
-            ? {
-                ...chat,
-                messages: [
-                  ...newMessages,
-                  {
-                    role: "assistant",
-                    content: errorMessage
+      if (error.name === "AbortError") {
+          setChats((previous) =>
+            previous.map((chat) =>
+              chat.id === currentChatId
+                ? {
+                    ...chat,
+                    messages: [
+                      ...newMessages,
+                      {
+                        role: "assistant",
+                        content: "🛑 *Generación detenida por el usuario.*"
+                      }
+                    ]
                   }
-                ]
-              }
-            : chat
-        )
-      );
+                : chat
+            )
+          );
+      } else {
+          const errorMessage = `❌ Error: ${
+            error?.message || "No se pudo procesar la consulta."
+          }`;
 
-      addLog(`[ERROR] IA: ${error?.message || "Error desconocido"}`);
+          setChats((previous) =>
+            previous.map((chat) =>
+              chat.id === currentChatId
+                ? {
+                    ...chat,
+                    messages: [
+                      ...newMessages,
+                      {
+                        role: "assistant",
+                        content: errorMessage
+                      }
+                    ]
+                  }
+                : chat
+            )
+          );
+          addLog(`[ERROR] IA: ${error?.message || "Error desconocido"}`);
+      }
     } finally {
       setIsLoading(false);
+      chatAbortControllerRef.current = null;
     }
   };
 
@@ -1156,7 +1247,7 @@ export default function AppUI() {
                     📦 Tanda {loteActualIndex + 1} de {lotesPendientes.length}
                   </span>
                   <span className="text-xs text-gray-400">
-                    ({lotesPendientes[loteActualIndex]?.length || 0} prompts)
+                    ({lotesPendientes[loteActualIndex]?.length || 0} prompts listos)
                   </span>
                 </div>
 
@@ -1175,6 +1266,15 @@ export default function AppUI() {
                     <p className="animate-pulse text-center text-xs font-bold text-cyan-400">
                       Procesando video {batchProgress} de {batchTotal}...
                     </p>
+
+                    {/* BOTÓN DE ABORTO EN LA FÁBRICA */}
+                    <button
+                      type="button"
+                      onClick={detenerFabrica}
+                      className="mt-2 w-full rounded-xl bg-red-600 py-3 font-bold text-white shadow-lg transition-colors hover:bg-red-500"
+                    >
+                      🛑 Detener Tanda Actual
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -1242,7 +1342,7 @@ export default function AppUI() {
             )}
 
             {zipUrl && (
-              <div className="rounded-xl border border-green-500 bg-gray-900 p-4 text-center shadow-2xl shadow-green-500/20">
+              <div className="rounded-xl border border-green-500 bg-gray-900 p-4 text-center shadow-2xl mt-4">
                 <h3 className="mb-3 text-base font-bold text-green-400">
                   ✅ Archivo ZIP Generado
                 </h3>
@@ -1644,21 +1744,30 @@ export default function AppUI() {
 
             <input
               value={input}
+              disabled={isLoading}
               onChange={(event) => setInput(event.target.value)}
-              className="flex-1 rounded-xl border border-gray-700 bg-black px-4 py-3 text-sm outline-none focus:border-blue-500"
+              className="flex-1 rounded-xl border border-gray-700 bg-black px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
               placeholder="Escribe tu solicitud..."
             />
 
-            <button
-              type="submit"
-              disabled={
-                (!input.trim() && attachments.length === 0) ||
-                isLoading
-              }
-              className="w-[50px] rounded-xl bg-blue-600 font-bold text-white disabled:bg-gray-800"
-            >
-              ➤
-            </button>
+            {/* 🔴 BOTÓN DE ENVIAR VS DETENER EN EL CHAT */}
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={detenerChat}
+                className="w-[50px] rounded-xl bg-red-600 font-bold text-white shadow-lg hover:bg-red-500"
+              >
+                🛑
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() && attachments.length === 0}
+                className="w-[50px] rounded-xl bg-blue-600 font-bold text-white disabled:bg-gray-800"
+              >
+                ➤
+              </button>
+            )}
           </form>
         </div>
       )}

@@ -346,7 +346,8 @@ export async function procesarConsultaIA({
   finalInput = "",
   history = [],
   images = [],
-  currentKey = null
+  currentKey = null,
+  signal = null // 🔴 AÑADIDO EL RECEPTOR DE SEÑAL DE CANCELACIÓN
 }) {
   const modelList = MODEL_VERSIONS[activeModel];
 
@@ -354,8 +355,7 @@ export async function procesarConsultaIA({
     throw new Error(`Proveedor de IA no soportado: ${activeModel}`);
   }
 
-  const selectedModel =
-    specificModel || modelList[0]?.id;
+  const selectedModel = specificModel || modelList[0]?.id;
 
   if (!selectedModel) {
     throw new Error(`No hay un modelo configurado para ${activeModel}.`);
@@ -373,10 +373,7 @@ export async function procesarConsultaIA({
         .filter((message) => message?.role && message?.content)
         .slice(-10)
         .map((message) => ({
-          role:
-            message.role === "assistant"
-              ? "assistant"
-              : "user",
+          role: message.role === "assistant" ? "assistant" : "user",
           content: String(message.content)
         }))
     : [];
@@ -389,8 +386,7 @@ export async function procesarConsultaIA({
       data: getImageBase64(image)
     }));
 
-  const systemInstruction =
-    PERSONAS[activePersona] || PERSONAS.default;
+  const systemInstruction = PERSONAS[activePersona] || PERSONAS.default;
 
   const payload = {
     activeModel,
@@ -415,18 +411,19 @@ export async function procesarConsultaIA({
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal // 🔴 AÑADIDO AL FETCH PARA PODER CORTARLO DE RAÍZ
     });
   } catch (error) {
+    if (error.name === "AbortError") {
+      throw error; // Se pasa intacto a la capa UI
+    }
     throw new Error(
-      `No se pudo conectar con el Worker de IA: ${
-        error?.message || "Error de red"
-      }`
+      `No se pudo conectar con el Worker de IA: ${error?.message || "Error de red"}`
     );
   }
 
-  const contentType =
-    response.headers.get("content-type") || "";
+  const contentType = response.headers.get("content-type") || "";
 
   let data;
 
@@ -441,9 +438,7 @@ export async function procesarConsultaIA({
   }
 
   if (!response.ok) {
-    throw new Error(
-      getErrorMessage(data, response.status)
-    );
+    throw new Error(getErrorMessage(data, response.status));
   }
 
   const botReply = extractTextFromResponse(data);
@@ -458,13 +453,8 @@ export async function procesarConsultaIA({
   let uiReply = botReply;
 
   if (activePersona === "director") {
-    const planFromWorker = normalizeDirectorPlan(
-      data?.directorPlan
-    );
-
-    const planFromText = normalizeDirectorPlan(
-      parseJsonArrayFromText(botReply)
-    );
+    const planFromWorker = normalizeDirectorPlan(data?.directorPlan);
+    const planFromText = normalizeDirectorPlan(parseJsonArrayFromText(botReply));
 
     directorPlan = planFromWorker || planFromText;
 
@@ -490,144 +480,51 @@ export async function procesarConsultaIA({
   };
 }
 
-// ============================================================================
-// 🚀 PUENTE UNIVERSAL MODAL SERVERLESS
-// ============================================================================
+// ... EL RESTO DE LAS FUNCIONES SE MANTIENEN IGUAL (conectarModalServerless, generarImagenIA)
 
-export async function conectarModalServerless(
-  workflowJSON,
-  webhookUrl
-) {
-  if (!webhookUrl) {
-    throw new Error(
-      "No hay URL de Webhook configurada."
-    );
-  }
-
+export async function conectarModalServerless(workflowJSON, webhookUrl) {
+  if (!webhookUrl) throw new Error("No hay URL de Webhook configurada.");
   let response;
-
   try {
     response = await fetch(webhookUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        workflow: workflowJSON
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflow: workflowJSON })
     });
   } catch (error) {
-    throw new Error(
-      `Fallo de conexión con Modal: ${
-        error?.message || "Error de red"
-      }`
-    );
+    throw new Error(`Fallo de conexión con Modal: ${error?.message || "Error de red"}`);
   }
-
-  const contentType =
-    response.headers.get("content-type") || "";
-
+  const contentType = response.headers.get("content-type") || "";
   let data;
-
   try {
-    data = contentType.includes("application/json")
-      ? await response.json()
-      : await response.text();
+    data = contentType.includes("application/json") ? await response.json() : await response.text();
   } catch {
-    throw new Error(
-      "Modal devolvió una respuesta ilegible."
-    );
+    throw new Error("Modal devolvió una respuesta ilegible.");
   }
-
-  if (!response.ok) {
-    throw new Error(
-      `Error ${response.status}: ${getErrorMessage(
-        data,
-        response.status
-      )}`
-    );
-  }
-
+  if (!response.ok) throw new Error(`Error ${response.status}: ${getErrorMessage(data, response.status)}`);
   return data;
 }
 
-// ============================================================================
-// 📸 MOTOR DE RESPALDO DE IMÁGENES
-// ============================================================================
-
-export async function generarImagenIA(
-  prompt,
-  {
-    width = 1920,
-    height = 1080,
-    seed = Math.floor(Math.random() * 1000000),
-    model = "flux"
-  } = {}
-) {
-  if (!prompt || !String(prompt).trim()) {
-    throw new Error(
-      "Debes proporcionar un prompt para generar la imagen."
-    );
-  }
-
-  const url =
-    `https://image.pollinations.ai/prompt/` +
-    `${encodeURIComponent(String(prompt).trim())}` +
-    `?width=${width}` +
-    `&height=${height}` +
-    `&seed=${seed}` +
-    `&nologo=true` +
-    `&model=${encodeURIComponent(model)}`;
-
+export async function generarImagenIA(prompt, { width = 1920, height = 1080, seed = Math.floor(Math.random() * 1000000), model = "flux" } = {}) {
+  if (!prompt || !String(prompt).trim()) throw new Error("Debes proporcionar un prompt para generar la imagen.");
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(String(prompt).trim())}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${encodeURIComponent(model)}`;
   let response;
-
   try {
     response = await fetch(url);
   } catch (error) {
-    throw new Error(
-      `Error de red al generar la imagen: ${
-        error?.message || "Error desconocido"
-      }`
-    );
+    throw new Error(`Error de red al generar la imagen: ${error?.message || "Error desconocido"}`);
   }
-
-  if (!response.ok) {
-    throw new Error(
-      `[${response.status}] El servicio de imágenes no está disponible.`
-    );
-  }
-
+  if (!response.ok) throw new Error(`[${response.status}] El servicio de imágenes no está disponible.`);
   const blob = await response.blob();
-
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = () => {
       const result = String(reader.result || "");
-      const base64 = result.includes(",")
-        ? result.split(",")[1]
-        : result;
-
-      if (!base64) {
-        reject(
-          new Error(
-            "El servicio no devolvió una imagen válida."
-          )
-        );
-        return;
-      }
-
+      const base64 = result.includes(",") ? result.split(",")[1] : result;
+      if (!base64) { reject(new Error("El servicio no devolvió una imagen válida.")); return; }
       resolve(base64);
     };
-
-    reader.onerror = () => {
-      reject(
-        new Error(
-          "No se pudo convertir la imagen a Base64."
-        )
-      );
-    };
-
+    reader.onerror = () => { reject(new Error("No se pudo convertir la imagen a Base64.")); };
     reader.readAsDataURL(blob);
   });
 }
