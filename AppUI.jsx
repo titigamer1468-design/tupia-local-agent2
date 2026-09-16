@@ -5,7 +5,7 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-// AppUI.jsx - INTEGRACIÓN DIRECTA CON EL NAVEGADOR Y AUTO-ESPERA 💻
+// AppUI.jsx - SÚPER FÁBRICA BLINDADA CON TANDAS DE 6 Y AUTO-ESPERA 💻
 const API_BASE = "https://tupia-local-agent1.titigamer1468.workers.dev";
 
 const fileToBase64 = (file) =>
@@ -133,7 +133,7 @@ export default function AppUI() {
   );
   const [videoResult, setVideoResult] = useState(null);
 
-  // FÁBRICA
+  // FÁBRICA Y TANDAS DE 6
   const [factoryMode, setFactoryMode] = useState("image");
   const [factoryEngineMode, setFactoryEngineMode] = useState("navegador");
   const [batchInput, setBatchInput] = useState("");
@@ -146,6 +146,9 @@ export default function AppUI() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [zipUrl, setZipUrl] = useState(null);
+
+  const [lotesPendientes, setLotesPendientes] = useState([]);
+  const [loteActualIndex, setLoteActualIndex] = useState(0);
 
   const [isSettingsSaved, setIsSettingsSaved] = useState(false);
 
@@ -364,70 +367,8 @@ export default function AppUI() {
     return window.JSZip;
   };
 
-  // 🔴 CONEXIÓN BLINDADA CON POLLING AL NAVEGADOR
-  const processBrowserTask = async (prompt, index) => {
-    const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
-
-    // 1. Mandar a hacer el video a Cloudflare Worker
-    const response = await fetch(`${API_BASE}/api/ai`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        activeModel: "byteplus",
-        provider: "byteplus",
-        prompt: promptTexto
-      })
-    });
-
-    const data = await readJsonResponse(response);
-    const reply = data.reply || data.content || "";
-
-    // Si no es un video o no devuelve el ID, retornamos el texto crudo
-    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/);
-    if (!matchId) {
-      return { mensaje: "Respuesta directa recibida", detalle: reply };
-    }
-
-    const taskId = matchId[0];
-
-    // 2. Bucle de espera (Preguntamos cada 40 segundos, máximo 5 veces)
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      setBatchStatus(`⏳ Tarea ${index + 1}: ByteDance procesando... (Espera ${attempt}/5)`);
-      
-      // Esperar 40 segundos antes de volver a preguntar
-      await new Promise((resolve) => setTimeout(resolve, 40000));
-
-      const checkRes = await fetch(`${API_BASE}/api/ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          activeModel: "byteplus",
-          provider: "byteplus",
-          prompt: taskId
-        })
-      });
-
-      const checkData = await readJsonResponse(checkRes);
-      const checkReply = checkData.reply || "";
-
-      // Si ya hay un link de video en la respuesta
-      const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
-      if (urlMatch) {
-        let videoUrl = urlMatch[0];
-        if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
-        
-        return { 
-            mensaje: "✅ Video renderizado con éxito", 
-            video_url: videoUrl,
-            taskId: taskId
-        };
-      }
-    }
-
-    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
-  };
-
-  const handleBatchGeneration = async () => {
+  // 📦 DIVIDIR EN TANDAS DE 6 O MANDAR A VPS
+  const prepararLotesOEnviarVPS = async () => {
     let promptList = [];
 
     try {
@@ -462,22 +403,19 @@ export default function AppUI() {
       return;
     }
 
-    setIsBatching(true);
-    setZipUrl(null);
-    setBatchTotal(promptList.length);
-    setBatchProgress(0);
+    // SI ES MODO VPS (Se va todo el lote directo al Worker)
+    if (factoryEngineMode === "vps") {
+      setIsBatching(true);
+      setZipUrl(null);
+      setBatchTotal(promptList.length);
+      setBatchProgress(0);
 
-    try {
-      if (factoryEngineMode === "vps") {
-        setBatchStatus(
-          "☁️ Enviando lote a Cloudflare para procesamiento en segundo plano..."
-        );
+      try {
+        setBatchStatus("☁️ Enviando lote a Cloudflare para procesamiento en segundo plano...");
 
         const response = await fetch(`${API_BASE}/api/factory`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mode: "batch",
             promptList,
@@ -489,34 +427,110 @@ export default function AppUI() {
         const data = await readJsonResponse(response);
 
         setBatchProgress(promptList.length);
-        setBatchStatus(
-          `✅ ${
-            data.message ||
-            data.mensaje ||
-            "El lote fue recibido por Cloudflare."
-          }`
-        );
-
+        setBatchStatus(`✅ ${data.message || data.mensaje || "El lote fue recibido por Cloudflare."}`);
         addLog("[OK] Lote enviado al Worker.");
-        return;
+      } catch (error) {
+        setBatchStatus(`❌ Error de conexión: ${error.message}`);
+        addLog(`[ERROR] Fábrica: ${error.message}`);
+      } finally {
+        setIsBatching(false);
       }
+      return;
+    }
 
-      setBatchStatus(
-        `📱 Procesando lote 1x1 [Auto-Espera]... No cierres esta pestaña.`
-      );
+    // SI ES MODO NAVEGADOR (Lo partimos en bloques de 6)
+    const chunks = [];
+    for (let i = 0; i < promptList.length; i += 6) {
+      chunks.push(promptList.slice(i, i + 6));
+    }
+
+    setLotesPendientes(chunks);
+    setLoteActualIndex(0);
+    setZipUrl(null);
+    setBatchStatus(`✅ Se extrajeron ${promptList.length} prompts y se dividieron en ${chunks.length} tandas de 6.`);
+    addLog(`[OK] Fábrica cargada con ${promptList.length} prompts en ${chunks.length} tandas.`);
+  };
+
+  // 🔴 CONEXIÓN BLINDADA CON POLLING AL NAVEGADOR
+  const processBrowserTask = async (prompt, index) => {
+    const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
+
+    const response = await fetch(`${API_BASE}/api/ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        activeModel: "byteplus",
+        provider: "byteplus",
+        prompt: promptTexto
+      })
+    });
+
+    const data = await readJsonResponse(response);
+    const reply = data.reply || data.content || "";
+
+    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/);
+    if (!matchId) {
+      return { mensaje: "Respuesta directa recibida", detalle: reply };
+    }
+
+    const taskId = matchId[0];
+
+    // Bucle de espera (Preguntamos cada 40 segundos, máximo 6 veces)
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      setBatchStatus(`⏳ Video ${index + 1}/6: Renderizando en ByteDance... (Intento ${attempt}/6)`);
+      
+      await new Promise((resolve) => setTimeout(resolve, 40000));
+
+      const checkRes = await fetch(`${API_BASE}/api/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activeModel: "byteplus",
+          provider: "byteplus",
+          prompt: taskId
+        })
+      });
+
+      const checkData = await readJsonResponse(checkRes);
+      const checkReply = checkData.reply || "";
+
+      const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
+      if (urlMatch) {
+        let videoUrl = urlMatch[0];
+        if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
+        
+        return { 
+            mensaje: "✅ Video renderizado con éxito", 
+            video_url: videoUrl,
+            taskId: taskId
+        };
+      }
+    }
+
+    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
+  };
+
+  // 🚀 EJECUTAR LA TANDA ACTUAL DE 6
+  const ejecutarTandaActual = async () => {
+    const currentBatch = lotesPendientes[loteActualIndex];
+    if (!currentBatch || currentBatch.length === 0) return;
+
+    setIsBatching(true);
+    setZipUrl(null);
+    setBatchTotal(currentBatch.length);
+    setBatchProgress(0);
+
+    try {
+      setBatchStatus(`🚀 Iniciando Tanda ${loteActualIndex + 1} (${currentBatch.length} videos)...`);
 
       const JSZip = await loadJSZip();
       const zip = new JSZip();
       const errors = [];
-      let report = `=== REPORTE DE SÚPER FÁBRICA ===\n\n`;
+      let report = `=== REPORTE TANDA ${loteActualIndex + 1} ===\n\n`;
 
-      for (let index = 0; index < promptList.length; index += 1) {
-        const prompt = promptList[index];
+      for (let index = 0; index < currentBatch.length; index += 1) {
+        const prompt = currentBatch[index];
         const taskNumber = index + 1;
-
-        setBatchStatus(
-          `Iniciando orden ${taskNumber} de ${promptList.length}...`
-        );
 
         let success = false;
         let lastError = "";
@@ -526,8 +540,7 @@ export default function AppUI() {
 
             if (result.video_url) {
                 try {
-                    setBatchStatus(`📥 Tarea ${taskNumber}: Descargando MP4 al ZIP...`);
-                    // 🔥 AQUÍ ESTÁ EL CAMBIO: Usamos nuestro proxy en el Worker para saltarnos el bloqueo CORS de ByteDance
+                    setBatchStatus(`📥 Descargando Video ${taskNumber}/6 mediante Proxy...`);
                     const vidRes = await fetch(`${API_BASE}/api/proxy`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -543,16 +556,15 @@ export default function AppUI() {
                     });
                     
                     const cleanB64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
-                    zip.folder("Videos_Generados").file(`Video_${taskNumber}.mp4`, cleanB64, { base64: true });
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Videos`).file(`Video_${taskNumber}.mp4`, cleanB64, { base64: true });
                     
-                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Empaquetado en el ZIP.\nURL Original: ${result.video_url}\n\n`;
+                    report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Empaquetado en el ZIP.\nURL Original: ${result.video_url}\n\n`;
                 } catch (corsErr) {
-                    // Fallback extremo
-                    zip.folder("Videos_Enlaces").file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
-                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Error al empaquetar. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
+                    report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Error al empaquetar por CORS. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
                 }
             } else {
-                report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}\nRespuesta: ${JSON.stringify(result)}\n\n`;
+                report += `Video ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}\nRespuesta: ${JSON.stringify(result)}\n\n`;
             }
             
             success = true;
@@ -561,36 +573,28 @@ export default function AppUI() {
         }
 
         if (!success) {
-          errors.push(`Tarea ${taskNumber}: ${lastError}`);
-
-          zip
-            .folder("Errores")
-            .file(
-              `ERROR_${taskNumber}.txt`,
-              `Error procesando la tarea.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`
-            );
+          errors.push(`Video ${taskNumber}: ${lastError}`);
+          zip.folder("Errores").file(`ERROR_Video_${taskNumber}.txt`, `Error procesando la tarea.\n\nOrden:\n${String(prompt)}\n\nError:\n${lastError}`);
         }
 
         setBatchProgress(taskNumber);
       }
 
-      zip.file("Reporte_Fábrica.txt", report);
+      zip.file(`Reporte_Tanda_${loteActualIndex + 1}.txt`, report);
 
-      setBatchStatus("📦 Empaquetando bitácora de resultados...");
+      setBatchStatus("📦 Empaquetando ZIP de la tanda...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const generatedUrl = URL.createObjectURL(zipBlob);
 
       setZipUrl(generatedUrl);
 
       if (errors.length > 0) {
-        setBatchStatus(
-          `⚠️ Lote finalizado con ${errors.length} error(es). Revisa la bitácora ZIP.`
-        );
+        setBatchStatus(`⚠️ Tanda completada con ${errors.length} error(es).`);
       } else {
-        setBatchStatus("✅ Lote procesado exitosamente.");
+        setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} procesada exitosamente!`);
       }
 
-      addLog("[OK] Lote auto-procesado por el navegador.");
+      addLog(`[OK] Tanda ${loteActualIndex + 1} auto-procesada.`);
     } catch (error) {
       console.error(error);
       setBatchStatus(`❌ Error de conexión: ${error.message}`);
@@ -1067,7 +1071,7 @@ export default function AppUI() {
                 className="rounded-lg border border-gray-700 bg-gray-900 p-1 text-xs font-normal text-white"
               >
                 <option value="navegador">
-                  💻 Procesar 1x1 en el navegador (Auto-Espera)
+                  💻 Procesar en navegador (Por Tandas)
                 </option>
                 <option value="vps">
                   ☁️ Cloudflare / VPS 24/7
@@ -1116,7 +1120,7 @@ export default function AppUI() {
                     ? "text-cyan-400 focus:border-cyan-500"
                     : "text-purple-400 focus:border-purple-500"
                 }`}
-                placeholder={`Pega aquí la lista de prompts que quieres procesar...`}
+                placeholder={`Pega aquí la lista de tus 120 prompts que quieres procesar...`}
               />
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1153,47 +1157,16 @@ export default function AppUI() {
 
               <p className="mt-3 text-xs text-gray-400">
                 {factoryEngineMode === "vps"
-                  ? "☁️ El lote se envía al Worker de Cloudflare."
-                  : "💻 El lote se procesará uno por uno. Deja esta pestaña abierta hasta que termine."}
+                  ? "☁️ El lote se envía al Worker de Cloudflare de un solo golpe."
+                  : "💻 El texto se dividirá automáticamente en bloques de 6. Podrás avanzar manualmente de tanda en tanda."}
               </p>
             </div>
 
-            {isBatching && (
-              <div className="rounded-xl border border-cyan-800/50 bg-gray-950 p-4 text-center">
-                <p className="mb-2 text-sm font-bold text-cyan-400">
-                  {batchStatus}
-                </p>
-
-                {factoryEngineMode === "navegador" && (
-                  <>
-                    <div className="mb-2 h-4 w-full overflow-hidden rounded-full bg-gray-800">
-                      <div
-                        className={`h-4 transition-all duration-300 ${
-                          factoryMode === "image"
-                            ? "bg-cyan-500"
-                            : "bg-purple-500"
-                        }`}
-                        style={{
-                          width:
-                            batchTotal > 0
-                              ? `${(batchProgress / batchTotal) * 100}%`
-                              : "0%"
-                        }}
-                      />
-                    </div>
-
-                    <p className="text-xs text-gray-500">
-                      {batchProgress} de {batchTotal} tareas completadas
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-
-            {!isBatching && (
+            {/* BOTÓN PRINCIPAL DE PREPARACIÓN */}
+            {!isBatching && lotesPendientes.length === 0 && (
               <button
                 type="button"
-                onClick={handleBatchGeneration}
+                onClick={prepararLotesOEnviarVPS}
                 className={`w-full rounded-xl bg-gradient-to-r py-4 font-bold text-white shadow-lg transition-all ${
                   factoryMode === "image"
                     ? "from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
@@ -1201,12 +1174,91 @@ export default function AppUI() {
                 }`}
               >
                 {factoryEngineMode === "vps"
-                  ? "🚀 Enviar lote a Cloudflare"
-                  : "🚀 Procesar Lote en Navegador"}
+                  ? "🚀 Enviar todo a Cloudflare"
+                  : "⚙️ Preparar Tandas de 6"}
               </button>
             )}
 
-            {!isBatching && batchStatus !== "Esperando instrucciones..." && (
+            {/* PANEL DE CONTROL DE TANDAS (MODO NAVEGADOR) */}
+            {factoryEngineMode === "navegador" && lotesPendientes.length > 0 && (
+              <div className="rounded-xl border border-purple-500/50 bg-gray-950 p-5 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between border-b border-gray-800 pb-2">
+                  <span className="text-sm font-bold text-purple-300">
+                    📦 Tanda {loteActualIndex + 1} de {lotesPendientes.length}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    ({lotesPendientes[loteActualIndex]?.length || 0} prompts)
+                  </span>
+                </div>
+
+                <p className="mb-4 text-xs leading-relaxed text-gray-400">
+                  {batchStatus}
+                </p>
+
+                {isBatching ? (
+                  <div className="space-y-3">
+                    <div className="h-4 w-full overflow-hidden rounded-full bg-gray-800">
+                      <div
+                        className="h-4 bg-purple-500 transition-all duration-300"
+                        style={{ width: batchTotal > 0 ? `${(batchProgress / batchTotal) * 100}%` : "0%" }}
+                      />
+                    </div>
+                    <p className="animate-pulse text-center text-xs font-bold text-cyan-400">
+                      Procesando video {batchProgress} de {batchTotal}...
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={ejecutarTandaActual}
+                    className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 py-4 font-bold text-white shadow-lg transition-all hover:from-purple-500 hover:to-pink-500"
+                  >
+                    ▶️ Reproducir Tanda {loteActualIndex + 1}
+                  </button>
+                )}
+
+                {/* BOTÓN PARA AVANZAR A LA SIGUIENTE TANDA */}
+                {!isBatching && zipUrl && loteActualIndex < lotesPendientes.length - 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoteActualIndex((prev) => prev + 1);
+                      setZipUrl(null);
+                      setBatchStatus(`Lista para ejecutar Tanda ${loteActualIndex + 2}`);
+                    }}
+                    className="mt-3 w-full rounded-xl bg-green-600 py-3 font-bold text-white transition-colors hover:bg-green-500"
+                  >
+                    ⏭️ Pasar a la Tanda {loteActualIndex + 2}
+                  </button>
+                )}
+                
+                {/* BOTÓN PARA REINICIAR Y CARGAR NUEVOS PROMPTS */}
+                {!isBatching && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                        setLotesPendientes([]);
+                        setZipUrl(null);
+                        setBatchStatus("Esperando instrucciones...");
+                    }}
+                    className="mt-3 w-full text-xs font-bold text-gray-500 hover:text-white"
+                  >
+                    Cancelar y cargar nuevos prompts
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* MODO VPS PROGRESS BAR */}
+            {factoryEngineMode === "vps" && isBatching && (
+              <div className="rounded-xl border border-cyan-800/50 bg-gray-950 p-4 text-center">
+                <p className="mb-2 text-sm font-bold text-cyan-400">
+                  {batchStatus}
+                </p>
+              </div>
+            )}
+
+            {!isBatching && batchStatus !== "Esperando instrucciones..." && lotesPendientes.length === 0 && (
               <div
                 className={`rounded-xl border p-4 text-center text-sm ${
                   batchStatus.startsWith("❌")
@@ -1223,19 +1275,19 @@ export default function AppUI() {
             {zipUrl && (
               <div className="rounded-xl border border-green-500 bg-gray-900 p-4 text-center shadow-2xl shadow-green-500/20">
                 <h3 className="mb-3 text-base font-bold text-green-400">
-                  ✅ Archivo ZIP generado
+                  ✅ Archivo ZIP Generado
                 </h3>
 
                 <p className="mb-4 text-xs text-gray-400">
-                  Tus resultados están listos. Descarga tu archivo a continuación.
+                  Los videos de esta tanda están listos. ¡Descarga tu archivo antes de pasar a la siguiente!
                 </p>
 
                 <a
                   href={zipUrl}
-                  download={`Resultados_${factoryMode}_${Date.now()}.zip`}
+                  download={`Tanda_${loteActualIndex + 1}_Videos_${Date.now()}.zip`}
                   className="block w-full rounded-xl bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500"
                 >
-                  📥 Descargar Archivo ZIP
+                  📥 Descargar ZIP de esta Tanda
                 </a>
               </div>
             )}
