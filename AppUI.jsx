@@ -1574,6 +1574,7 @@ export default function AppUI() {
               <option value="gemini">Gemini</option>
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
+              <option value="byteplus">🎬 BytePlus (Video)</option>
               <option value="multimedia">📸 Generar Imagen / Voz</option>
             </select>
 

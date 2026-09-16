@@ -6,7 +6,7 @@
 // Este archivo se ejecuta en el navegador.
 // No debe contener API Keys.
 //
-// Las credenciales de OpenAI, Claude, Gemini, DeepSeek, Alibaba y Nvidia
+// Las credenciales de OpenAI, Claude, Gemini, DeepSeek, Alibaba, Nvidia y BytePlus
 // deben vivir exclusivamente en Cloudflare Worker Secrets.
 //
 // Endpoint esperado:
@@ -56,6 +56,10 @@ export const MODEL_VERSIONS = {
   alibaba: [
     { id: "qwen-max", name: "Qwen Max" },
     { id: "qwen-plus", name: "Qwen Plus" }
+  ],
+
+  byteplus: [
+    { id: "dreamina-seedance-2-0-mini", name: "Dreamina Seedance 2.0 (Video)" }
   ],
 
   nvidia: [
@@ -324,7 +328,7 @@ const createDirectorUiReply = (directorPlan) => {
   return (
     `🎬 **¡El guion y la dirección están listos!**\n\n` +
     `He configurado el Estudio de Video con ` +
-    `${directorPlan.length} escenas.\n\n` +
+    `${directorPlan.length} scenes.\n\n` +
     `${scenes}\n\n` +
     `👉 Ve a la pestaña **ESTUDIO**, sube tus imágenes, ` +
     `ajusta el formato y renderiza el vídeo.`
