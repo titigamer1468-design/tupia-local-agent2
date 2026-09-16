@@ -224,10 +224,11 @@ export default {
             return jsonResponse({ error: "Falta configurar BYTEPLUS_API_KEY en Cloudflare Secrets." }, 500);
           }
 
-          // Se utiliza el sufijo exacto de BytePlus
           const targetModel = model?.includes("260615") ? model : "dreamina-seedance-2-0-mini-260615";
 
-          // La URL correcta usa "bytepluses.com"
+          // 🔥 EL FIX: Enviar única y exclusivamente tu prompt, sin historial ni personalidad
+          const videoMessage = [{ role: "user", content: prompt }];
+
           const res = await fetch("https://ark.ap-southeast.bytepluses.com/api/v3/chat/completions", {
             method: "POST",
             headers: {
@@ -236,7 +237,7 @@ export default {
             },
             body: JSON.stringify({
               model: targetModel, 
-              messages: messages
+              messages: videoMessage
             })
           });
 
@@ -245,7 +246,6 @@ export default {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error BytePlus HTTP ${res.status}` }, res.status);
           }
 
-          // Extraemos el contenido o, en su defecto, devolvemos todo el JSON de BytePlus 
           const replyText = data?.choices?.[0]?.message?.content || JSON.stringify(data, null, 2);
           
           return jsonResponse({ reply: replyText });
