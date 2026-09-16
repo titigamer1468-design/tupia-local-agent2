@@ -226,10 +226,10 @@ export default {
 
           const targetModel = model?.includes("260615") ? model : "dreamina-seedance-2-0-mini-260615";
 
-          // 🔥 EL FIX: Enviar única y exclusivamente tu prompt, sin historial ni personalidad
-          const videoMessage = [{ role: "user", content: prompt }];
-
-          const res = await fetch("https://ark.ap-southeast.bytepluses.com/api/v3/chat/completions", {
+          // 🔥 EL FIX DEFINITIVO:
+          // 1. Endpoint asíncrono de tareas de video (NO chat/completions)
+          // 2. Estructura de contenido "type: text" específica de ByteDance
+          const res = await fetch("https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -237,7 +237,12 @@ export default {
             },
             body: JSON.stringify({
               model: targetModel, 
-              messages: videoMessage
+              content: [
+                {
+                  type: "text",
+                  text: prompt
+                }
+              ]
             })
           });
 
@@ -246,7 +251,15 @@ export default {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error BytePlus HTTP ${res.status}` }, res.status);
           }
 
-          const replyText = data?.choices?.[0]?.message?.content || JSON.stringify(data, null, 2);
+          // La API asíncrona de video devuelve un ID de tarea
+          const taskId = data?.id || data?.task_id || data?.data?.id;
+          
+          let replyText = "";
+          if (taskId) {
+            replyText = `✅ **¡Orden recibida en ByteDance!**\n\nTu video se está renderizando en la nube.\n* **ID de Tarea:** \`${taskId}\`\n\n*(La IA tardará un par de minutos en procesar la orden).*`;
+          } else {
+            replyText = JSON.stringify(data, null, 2);
+          }
           
           return jsonResponse({ reply: replyText });
         }
