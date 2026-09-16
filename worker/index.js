@@ -217,6 +217,39 @@ export default {
           return jsonResponse({ reply: data?.choices?.[0]?.message?.content || "" });
         }
 
+        // --- BYTEPLUS (DREAMINA SEEDANCE) ---
+        if (provider === "byteplus") {
+          const apiKey = env.BYTEPLUS_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar BYTEPLUS_API_KEY en Cloudflare Secrets." }, 500);
+          }
+
+          // Se utiliza el endpoint de Ark compatible con la sintaxis general
+          const res = await fetch("https://ark.ap-southeast.byteplusapi.com/api/v3/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              // Usa el modelo pasado por la UI (dreamina-seedance-2-0-mini)
+              model: model || "dreamina-seedance-2-0-mini-260615", 
+              messages: messages
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || data?.error || `Error BytePlus HTTP ${res.status}` }, res.status);
+          }
+
+          // Extraemos el contenido o, en su defecto, devolvemos todo el JSON de BytePlus 
+          // (algunos modelos de video devuelven un job_id en lugar de un texto directo).
+          const replyText = data?.choices?.[0]?.message?.content || JSON.stringify(data, null, 2);
+          
+          return jsonResponse({ reply: replyText });
+        }
+
         return jsonResponse({ error: `Proveedor no soportado: ${provider}` }, 400);
       } catch (err) {
         return jsonResponse({ error: err.message || "Error interno en Worker" }, 500);
