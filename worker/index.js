@@ -224,11 +224,34 @@ export default {
             return jsonResponse({ error: "Falta configurar BYTEPLUS_API_KEY en Cloudflare Secrets." }, 500);
           }
 
+          // 🔍 NUEVO: Si el prompt es un ID de tarea, consultamos el estado del video
+          if (prompt.trim().startsWith("cgt-")) {
+            const taskId = prompt.trim();
+            const res = await fetch(`https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks/${taskId}`, {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${apiKey}`
+              }
+            });
+            const data = await res.json();
+            
+            // Si el video ya está listo, devolvemos el enlace
+            if (data?.content?.video_url) {
+                return jsonResponse({ reply: `✅ **¡Tu video está listo!**\n\nAquí tienes el enlace directo:\n${data.content.video_url}` });
+            } 
+            // Si sigue procesando o en cola, avisamos
+            else if (data?.task_status || data?.status) {
+                return jsonResponse({ reply: `⏳ **Estado:** ${data.task_status || data.status}\n\nEl video aún se está renderizando. Vuelve a enviar el ID en un minuto.` });
+            } 
+            // Fallback por si hay otro tipo de mensaje
+            else {
+                return jsonResponse({ reply: `Respuesta de estado:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`` });
+            }
+          }
+
+          // 🎬 NORMAL: Generar un nuevo video si no es un ID
           const targetModel = model?.includes("260615") ? model : "dreamina-seedance-2-0-mini-260615";
 
-          // 🔥 EL FIX DEFINITIVO:
-          // 1. Endpoint asíncrono de tareas de video (NO chat/completions)
-          // 2. Estructura de contenido "type: text" específica de ByteDance
           const res = await fetch("https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks", {
             method: "POST",
             headers: {
@@ -256,7 +279,7 @@ export default {
           
           let replyText = "";
           if (taskId) {
-            replyText = `✅ **¡Orden recibida en ByteDance!**\n\nTu video se está renderizando en la nube.\n* **ID de Tarea:** \`${taskId}\`\n\n*(La IA tardará un par de minutos en procesar la orden).*`;
+            replyText = `✅ **¡Orden recibida en ByteDance!**\n\nTu video se está renderizando en la nube.\n* **ID de Tarea:** \`${taskId}\`\n\n*(Copia y pega ese ID en el chat para consultar si ya está listo).*`;
           } else {
             replyText = JSON.stringify(data, null, 2);
           }
