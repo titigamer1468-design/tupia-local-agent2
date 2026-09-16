@@ -387,6 +387,26 @@ export default {
     }
 
     // ========================================================================
+    // 3.5 PROXY PARA DESCARGAR VIDEOS SIN CORS (/api/proxy)
+    // ========================================================================
+    if (url.pathname === "/api/proxy" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const videoRes = await fetch(body.targetUrl);
+        const arrayBuffer = await videoRes.arrayBuffer();
+        
+        return new Response(arrayBuffer, {
+          headers: {
+            "Content-Type": "video/mp4",
+            ...CORS_HEADERS
+          }
+        });
+      } catch (err) {
+        return jsonResponse({ error: "Fallo al descargar video en proxy" }, 500);
+      }
+    }
+
+    // ========================================================================
     // 4. ARCHIVOS ESTÁTICOS
     // ========================================================================
     if (env.ASSETS) {

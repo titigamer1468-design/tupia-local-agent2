@@ -527,7 +527,13 @@ export default function AppUI() {
             if (result.video_url) {
                 try {
                     setBatchStatus(`📥 Tarea ${taskNumber}: Descargando MP4 al ZIP...`);
-                    const vidRes = await fetch(result.video_url);
+                    // 🔥 AQUÍ ESTÁ EL CAMBIO: Usamos nuestro proxy en el Worker para saltarnos el bloqueo CORS de ByteDance
+                    const vidRes = await fetch(`${API_BASE}/api/proxy`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ targetUrl: result.video_url })
+                    });
+                    
                     const vidBlob = await vidRes.blob();
                     
                     const reader = new FileReader();
@@ -541,9 +547,9 @@ export default function AppUI() {
                     
                     report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Empaquetado en el ZIP.\nURL Original: ${result.video_url}\n\n`;
                 } catch (corsErr) {
-                    // Fallback de seguridad si ByteDance bloquea la descarga directa
+                    // Fallback extremo
                     zip.folder("Videos_Enlaces").file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
-                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Bloqueado por CORS. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
+                    report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Error al empaquetar. Se guardó el enlace.\nURL Directa: ${result.video_url}\n\n`;
                 }
             } else {
                 report += `Tarea ${taskNumber}:\nOrden: ${String(prompt).slice(0, 100)}\nRespuesta: ${JSON.stringify(result)}\n\n`;
