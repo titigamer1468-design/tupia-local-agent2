@@ -239,6 +239,10 @@ export default {
             if (data?.content?.video_url) {
                 return jsonResponse({ reply: `✅ **¡Tu video está listo!**\n\nAquí tienes el enlace directo:\n${data.content.video_url}` });
             } 
+            // 🔥 CORRECCIÓN CLAVE: Si el estado es "failed", se detiene el polling inmediatamente
+            else if (data?.task_status === "failed" || data?.status === "failed") {
+                return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nByteDance rechazó este video y lo canceló permanentemente debido a sus filtros de seguridad/censura. El prompt contenía palabras restringidas.` });
+            }
             // Si sigue procesando o en cola, avisamos
             else if (data?.task_status || data?.status) {
                 return jsonResponse({ reply: `⏳ **Estado:** ${data.task_status || data.status}\n\nEl video aún se está renderizando. Vuelve a enviar el ID en un minuto.` });

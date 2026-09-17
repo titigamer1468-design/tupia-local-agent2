@@ -504,6 +504,11 @@ export default function AppUI() {
       const checkData = await readJsonResponse(checkRes);
       const checkReply = checkData.reply || "";
 
+      // 🔥 DETECCIÓN INSTANTÁNEA DE CENSURA
+      if (checkReply.toLowerCase().includes("failed")) {
+          throw new Error("ByteDance rechazó este prompt por su filtro de seguridad (Censura).");
+      }
+
       const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
       if (urlMatch) {
         let videoUrl = urlMatch[0];
