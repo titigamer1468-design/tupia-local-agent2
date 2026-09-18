@@ -426,7 +426,13 @@ export default function AppUI() {
     // SI ES MODO NAVEGADOR (Lo partimos en bloques de 6)
     const chunks = [];
     for (let i = 0; i < promptList.length; i += 6) {
-      chunks.push(promptList.slice(i, i + 6));
+      // 💡 CORRECCIÓN DE ORDEN: Guardamos también el índice original global de cada prompt
+      chunks.push(
+        promptList.slice(i, i + 6).map((promptText, localIndex) => ({
+          text: promptText,
+          globalIndex: i + localIndex + 1 // Para que empiece en 1, 2, 3... 120
+        }))
+      );
     }
 
     setLotesPendientes(chunks);
@@ -454,8 +460,8 @@ export default function AppUI() {
   };
 
   // 🔴 POLLING INDIVIDUAL PARA CADA TAREA
-  const processBrowserTask = async (prompt, index) => {
-    const promptTexto = typeof prompt === "object" ? JSON.stringify(prompt) : String(prompt);
+  const processBrowserTask = async (promptText, displayIndex) => {
+    const promptTexto = typeof promptText === "object" ? JSON.stringify(promptText) : String(promptText);
 
     const response = await fetch(`${API_BASE}/api/ai`, {
       method: "POST",
@@ -480,7 +486,7 @@ export default function AppUI() {
 
     // Bucle de espera segmentado (Preguntamos cada 40 segundos, máximo 6 veces)
     for (let attempt = 1; attempt <= 6; attempt++) {
-      setBatchStatus(`⏳ Video ${index + 1}/6: Renderizando en ByteDance... (Intento ${attempt}/6)`);
+      setBatchStatus(`⏳ Tarea ${displayIndex}: Renderizando en ByteDance... (Intento ${attempt}/6)`);
       
       // Espera fragmentada de 40 segundos para poder responder al botón de aborto casi inmediatamente
       for (let w = 0; w < 40; w++) {
@@ -527,7 +533,7 @@ export default function AppUI() {
     throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
   };
 
-  // 🚀 EJECUTAR LA TANDA ACTUAL DE 6
+  // 🚀 EJECUTAR LA TANDA ACTUAL DE 6 DE FORMA SECUENCIAL ESTRICTA
   const ejecutarTandaActual = async () => {
     const currentBatch = lotesPendientes[loteActualIndex];
     if (!currentBatch || currentBatch.length === 0) return;
@@ -547,24 +553,26 @@ export default function AppUI() {
       const errors = [];
       let report = `=== REPORTE TANDA ${loteActualIndex + 1} ===\n\n`;
 
-      for (let index = 0; index < currentBatch.length; index += 1) {
+      // 💡 BUCLE FOR OF: Garantiza que procesemos y empaquetemos el video 1 antes de tocar el 2.
+      for (const promptObj of currentBatch) {
         // Verificar si se solicitó cancelación antes de iniciar la siguiente tarea
         if (isFactoryAbortedRef.current) {
             throw new Error("AbortError");
         }
 
-        const prompt = currentBatch[index];
-        const taskNumber = index + 1;
+        const promptText = promptObj.text;
+        const globalTaskNumber = promptObj.globalIndex; // Ej: 1, 2, 7, 8... 
 
         let success = false;
         let lastError = "";
 
         try {
-            const result = await processBrowserTask(prompt, index);
+            // Mandar a renderizar y esperar a que termine
+            const result = await processBrowserTask(promptText, globalTaskNumber);
 
             if (result.video_url) {
                 try {
-                    setBatchStatus(`📥 Descargando Video ${taskNumber}/6 mediante Proxy...`);
+                    setBatchStatus(`📥 Descargando Video ${globalTaskNumber} mediante Proxy...`);
                     const vidRes = await fetch(`${API_BASE}/api/proxy`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -581,18 +589,23 @@ export default function AppUI() {
                     });
                     
                     const cleanB64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
-                    zip.folder(`Tanda_${loteActualIndex + 1}_Videos`).file(`Video_${taskNumber}.mp4`, cleanB64, { base64: true });
                     
-                    report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ✅ Guardado en ZIP.\n\n`;
+                    // 💡 FORMATO DE NOMBRE ORDENADO: "Video_001.mp4", "Video_014.mp4"
+                    const formattedNumber = String(globalTaskNumber).padStart(3, '0');
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Videos`).file(`Video_${formattedNumber}.mp4`, cleanB64, { base64: true });
+                    
+                    report += `Video ${formattedNumber}:\nPrompt: ${String(promptText).slice(0, 100)}...\nEstado: ✅ Guardado en ZIP.\n\n`;
                 } catch (corsErr) {
                     if (corsErr.name === "AbortError" || isFactoryAbortedRef.current) {
                         throw new Error("AbortError");
                     }
-                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${taskNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
-                    report += `Video ${taskNumber}:\nPrompt: ${String(prompt).slice(0, 100)}...\nEstado: ⚠️ Guardado por enlace directo.\n\n`;
+                    const formattedNumber = String(globalTaskNumber).padStart(3, '0');
+                    zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${formattedNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
+                    report += `Video ${formattedNumber}:\nPrompt: ${String(promptText).slice(0, 100)}...\nEstado: ⚠️ Guardado por enlace directo.\n\n`;
                 }
             } else {
-                report += `Video ${taskNumber}:\nRespuesta: ${JSON.stringify(result)}\n\n`;
+                const formattedNumber = String(globalTaskNumber).padStart(3, '0');
+                report += `Video ${formattedNumber}:\nRespuesta: ${JSON.stringify(result)}\n\n`;
             }
             
             success = true;
@@ -604,16 +617,18 @@ export default function AppUI() {
         }
 
         if (!success) {
-          errors.push(`Video ${taskNumber}: ${lastError}`);
-          zip.folder("Errores").file(`ERROR_Video_${taskNumber}.txt`, `Error:\n${lastError}`);
+          const formattedNumber = String(globalTaskNumber).padStart(3, '0');
+          errors.push(`Video ${formattedNumber}: ${lastError}`);
+          zip.folder("Errores").file(`ERROR_Video_${formattedNumber}.txt`, `Error:\n${lastError}`);
         }
 
-        setBatchProgress(taskNumber);
+        // Actualizar barra de progreso (+1 por cada video terminado)
+        setBatchProgress((prev) => prev + 1);
       }
 
       zip.file(`Reporte_Tanda_${loteActualIndex + 1}.txt`, report);
 
-      setBatchStatus("📦 Empaquetando ZIP de la tanda...");
+      setBatchStatus("📦 Empaquetando ZIP ordenado de la tanda...");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const generatedUrl = URL.createObjectURL(zipBlob);
 
@@ -622,19 +637,16 @@ export default function AppUI() {
       if (errors.length > 0) {
         setBatchStatus(`⚠️ Tanda completada con ${errors.length} error(es).`);
       } else {
-        setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} procesada exitosamente!`);
+        setBatchStatus(`✅ ¡Tanda ${loteActualIndex + 1} procesada y ordenada exitosamente!`);
       }
 
-      addLog(`[OK] Tanda ${loteActualIndex + 1} procesada.`);
+      addLog(`[OK] Tanda ${loteActualIndex + 1} procesada en orden secuencial.`);
 
     } catch (error) {
       if (error.message === "AbortError" || error.name === "AbortError") {
          setBatchStatus("🛑 Detenido. Generando ZIP con los videos completados...");
          try {
-             // Si el usuario canceló a la mitad, generamos el ZIP con lo que sí se logró hacer
              const JSZip = await loadJSZip(); 
-             // Se guarda el progreso actual en caso de detener a la mitad. 
-             // Nota: En la próxima ejecución se empaquetará, la variable de estado 'zipUrl' se llenará igual en el finally o antes.
          } catch(e) {}
       } else {
          console.error(error);
