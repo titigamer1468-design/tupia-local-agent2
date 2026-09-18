@@ -291,6 +291,53 @@ export default {
           return jsonResponse({ reply: replyText });
         }
 
+        // --- GOOGLE FLOW MUSIC (VÍA USEAPI PUENTE) ---
+        if (provider === "flowmusic") {
+          const apiKey = env.USEAPI_TOKEN;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar USEAPI_TOKEN en Cloudflare Secrets." }, 500);
+          }
+
+          // Si el prompt es un ID (empieza con num/letras y guiones largos), consultamos si ya se renderizó
+          if (prompt.trim().length > 15 && !prompt.includes(" ")) {
+            const taskId = prompt.trim();
+            const res = await fetch(`https://api.useapi.net/v1/flowmusic/status/${taskId}`, {
+              method: "GET",
+              headers: { "Authorization": `Bearer ${apiKey}` }
+            });
+            const data = await res.json();
+            
+            if (data?.status === "completed" && data?.video_url) {
+                return jsonResponse({ reply: `✅ **¡Tu video de Google está listo!**\n\nEnlace:\n${data.video_url}` });
+            } else if (data?.status === "failed") {
+                return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nGoogle rechazó el prompt.` });
+            } else {
+                return jsonResponse({ reply: `⏳ **Estado:** Procesando...\n\nEl video se está renderizando con tus créditos Pro. Vuelve a enviar el ID.` });
+            }
+          }
+
+          // Enviar la orden de creación consumiendo tus créditos
+          const res = await fetch("https://api.useapi.net/v1/flowmusic/generate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({ prompt: prompt, aspect_ratio: "9:16" })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error || `Error FlowMusic HTTP ${res.status}` }, res.status);
+          }
+
+          const taskId = data?.task_id || data?.id;
+          if (taskId) {
+            return jsonResponse({ reply: `✅ **¡Orden enviada a Google!**\n\nSe descontaron créditos de tu cuenta Pro.\n* **ID de Tarea:** \`${taskId}\`` });
+          }
+          return jsonResponse({ reply: JSON.stringify(data, null, 2) });
+        }
+
         return jsonResponse({ error: `Proveedor no soportado: ${provider}` }, 400);
       } catch (err) {
         return jsonResponse({ error: err.message || "Error interno en Worker" }, 500);

@@ -62,6 +62,10 @@ export const MODEL_VERSIONS = {
     { id: "dreamina-seedance-2-0-mini", name: "Dreamina Seedance 2.0 (Video)" }
   ],
 
+  flowmusic: [
+    { id: "google-flow-pro", name: "Google Flow (Usa tus Créditos)" }
+  ],
+
   nvidia: [
     { id: "meta/llama3-70b-instruct", name: "Llama 3 70B" }
   ],
@@ -501,7 +505,7 @@ export async function conectarModalServerless(workflowJSON, webhookUrl) {
   } catch {
     throw new Error("Modal devolvió una respuesta ilegible.");
   }
-  if (!response.ok) throw new Error(`Error ${response.status}: ${getErrorMessage(data, response.status)}`);
+  if (!response.ok) throw new Error(`Error ${response.status}:${getErrorMessage(data, response.status)}`);
   return data;
 }
 

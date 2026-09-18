@@ -463,12 +463,15 @@ export default function AppUI() {
   const processBrowserTask = async (promptText, displayIndex) => {
     const promptTexto = typeof promptText === "object" ? JSON.stringify(promptText) : String(promptText);
 
+    // Ajuste dinámico de proveedor según lo seleccionado
+    const currentProvider = activeModel === "flowmusic" ? "flowmusic" : "byteplus";
+
     const response = await fetch(`${API_BASE}/api/ai`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        activeModel: "byteplus",
-        provider: "byteplus",
+        activeModel: currentProvider,
+        provider: currentProvider,
         prompt: promptTexto
       }),
       signal: factoryAbortControllerRef.current?.signal
@@ -477,7 +480,9 @@ export default function AppUI() {
     const data = await readJsonResponse(response);
     const reply = data.reply || data.content || "";
 
-    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/);
+    // Reconoce tanto IDs de ByteDance (cgt-xxx) como IDs de UseAPI (números/letras sin espacios)
+    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/) || (currentProvider === "flowmusic" ? reply.match(/[a-zA-Z0-9\-]{16,}/) : null);
+    
     if (!matchId) {
       return { mensaje: "Respuesta directa recibida", detalle: reply };
     }
@@ -486,7 +491,7 @@ export default function AppUI() {
 
     // Bucle de espera segmentado (Preguntamos cada 40 segundos, máximo 6 veces)
     for (let attempt = 1; attempt <= 6; attempt++) {
-      setBatchStatus(`⏳ Tarea ${displayIndex}: Renderizando en ByteDance... (Intento ${attempt}/6)`);
+      setBatchStatus(`⏳ Tarea ${displayIndex}: Renderizando en la nube... (Intento ${attempt}/6)`);
       
       // Espera fragmentada de 40 segundos para poder responder al botón de aborto casi inmediatamente
       for (let w = 0; w < 40; w++) {
@@ -500,8 +505,8 @@ export default function AppUI() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          activeModel: "byteplus",
-          provider: "byteplus",
+          activeModel: currentProvider,
+          provider: currentProvider,
           prompt: taskId
         }),
         signal: factoryAbortControllerRef.current?.signal
@@ -512,7 +517,7 @@ export default function AppUI() {
 
       // 🔥 DETECCIÓN INSTANTÁNEA DE CENSURA
       if (checkReply.toLowerCase().includes("failed")) {
-          throw new Error("ByteDance rechazó este prompt por su filtro de seguridad (Censura).");
+          throw new Error("El sistema de IA rechazó este prompt por su filtro de seguridad (Censura).");
       }
 
       const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
@@ -553,15 +558,15 @@ export default function AppUI() {
       const errors = [];
       let report = `=== REPORTE TANDA ${loteActualIndex + 1} ===\n\n`;
 
+      let localIter = 0; // Para saber cuándo estamos en el último elemento
+
       // 💡 BUCLE FOR OF: Garantiza que procesemos y empaquetemos el video 1 antes de tocar el 2.
       for (const promptObj of currentBatch) {
-        // Verificar si se solicitó cancelación antes de iniciar la siguiente tarea
-        if (isFactoryAbortedRef.current) {
-            throw new Error("AbortError");
-        }
+        if (isFactoryAbortedRef.current) throw new Error("AbortError");
 
         const promptText = promptObj.text;
-        const globalTaskNumber = promptObj.globalIndex; // Ej: 1, 2, 7, 8... 
+        const globalTaskNumber = promptObj.globalIndex; 
+        localIter++;
 
         let success = false;
         let lastError = "";
@@ -590,15 +595,12 @@ export default function AppUI() {
                     
                     const cleanB64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
                     
-                    // 💡 FORMATO DE NOMBRE ORDENADO: "Video_001.mp4", "Video_014.mp4"
                     const formattedNumber = String(globalTaskNumber).padStart(3, '0');
                     zip.folder(`Tanda_${loteActualIndex + 1}_Videos`).file(`Video_${formattedNumber}.mp4`, cleanB64, { base64: true });
                     
                     report += `Video ${formattedNumber}:\nPrompt: ${String(promptText).slice(0, 100)}...\nEstado: ✅ Guardado en ZIP.\n\n`;
                 } catch (corsErr) {
-                    if (corsErr.name === "AbortError" || isFactoryAbortedRef.current) {
-                        throw new Error("AbortError");
-                    }
+                    if (corsErr.name === "AbortError" || isFactoryAbortedRef.current) throw new Error("AbortError");
                     const formattedNumber = String(globalTaskNumber).padStart(3, '0');
                     zip.folder(`Tanda_${loteActualIndex + 1}_Enlaces`).file(`Video_${formattedNumber}_Enlace.txt`, `Enlace de descarga directa:\n\n${result.video_url}`);
                     report += `Video ${formattedNumber}:\nPrompt: ${String(promptText).slice(0, 100)}...\nEstado: ⚠️ Guardado por enlace directo.\n\n`;
@@ -610,9 +612,7 @@ export default function AppUI() {
             
             success = true;
         } catch (error) {
-            if (error.message === "AbortError" || error.name === "AbortError") {
-                throw error;
-            }
+            if (error.message === "AbortError" || error.name === "AbortError") throw error;
             lastError = error.message || "Error desconocido";
         }
 
@@ -622,8 +622,16 @@ export default function AppUI() {
           zip.folder("Errores").file(`ERROR_Video_${formattedNumber}.txt`, `Error:\n${lastError}`);
         }
 
-        // Actualizar barra de progreso (+1 por cada video terminado)
         setBatchProgress((prev) => prev + 1);
+
+        // 🔥 ESCUDO HUMANO: PAUSA DE 60 SEGUNDOS ENTRE VIDEOS (Excepto en el último)
+        if (localIter < currentBatch.length && !isFactoryAbortedRef.current) {
+            for (let w = 60; w > 0; w--) {
+                if (isFactoryAbortedRef.current) throw new Error("AbortError");
+                setBatchStatus(`🛡️ Pausa Anti-Ban: Esperando ${w} segundos antes del siguiente video...`);
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+        }
       }
 
       zip.file(`Reporte_Tanda_${loteActualIndex + 1}.txt`, report);
@@ -1704,6 +1712,8 @@ export default function AppUI() {
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
               <option value="byteplus">🎬 BytePlus (Video)</option>
+              {/* 👇 NUEVA OPCIÓN EN EL MENÚ 👇 */}
+              <option value="flowmusic">🎵 Google Flow (Videos Pro)</option>
               <option value="multimedia">📸 Generar Imagen / Voz</option>
             </select>
 
