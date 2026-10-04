@@ -6,7 +6,7 @@
 // Este archivo se ejecuta en el navegador.
 // No debe contener API Keys.
 //
-// Las credenciales de OpenAI, Claude, Gemini, DeepSeek, Alibaba, Nvidia y BytePlus
+// Las credenciales de OpenAI, Claude, Gemini, DeepSeek, Alibaba, Nvidia, BytePlus y Agnes
 // deben vivir exclusivamente en Cloudflare Worker Secrets.
 //
 // Endpoint esperado:
@@ -27,7 +27,7 @@ const CAMERA_EFFECTS = [
 ];
 
 // ============================================================================
-// MODELOS DISPONIBLES (Actualizado a Nomenclaturas Oficiales)
+// MODELOS DISPONIBLES (Actualizado con Agnes Video API)
 // ============================================================================
 
 export const MODEL_VERSIONS = {
@@ -60,6 +60,14 @@ export const MODEL_VERSIONS = {
 
   byteplus: [
     { id: "dreamina-seedance-2-0-mini", name: "Dreamina Seedance 2.0 (Video)" }
+  ],
+
+  runware: [
+    { id: "minimax-video", name: "MiniMax Video (Runware)" }
+  ],
+
+  agnes: [
+    { id: "agnes-video-v2-0", name: "Agnes Video API (v2.0 / 2.5)" }
   ],
 
   flowmusic: [
@@ -351,7 +359,7 @@ export async function procesarConsultaIA({
   history = [],
   images = [],
   currentKey = null,
-  signal = null // 🔴 AÑADIDO EL RECEPTOR DE SEÑAL DE CANCELACIÓN
+  signal = null
 }) {
   const modelList = MODEL_VERSIONS[activeModel];
 
@@ -416,11 +424,11 @@ export async function procesarConsultaIA({
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload),
-      signal // 🔴 AÑADIDO AL FETCH PARA PODER CORTARLO DE RAÍZ
+      signal
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw error; // Se pasa intacto a la capa UI
+      throw error;
     }
     throw new Error(
       `No se pudo conectar con el Worker de IA: ${error?.message || "Error de red"}`
@@ -483,8 +491,6 @@ export async function procesarConsultaIA({
     model: selectedModel
   };
 }
-
-// ... EL RESTO DE LAS FUNCIONES SE MANTIENEN IGUAL (conectarModalServerless, generarImagenIA)
 
 export async function conectarModalServerless(workflowJSON, webhookUrl) {
   if (!webhookUrl) throw new Error("No hay URL de Webhook configurada.");

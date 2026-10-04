@@ -5,7 +5,7 @@ import {
 } from "./AIManager.js";
 import { renderVideo } from "./VideoEngine.js";
 
-// AppUI.jsx - SÚPER FÁBRICA BLINDADA CON TANDAS DE 6 Y AUTO-ESPERA 💻
+// AppUI.jsx - SÚPER FÁBRICA BLINDADA CON TANDAS DE 6 Y SOPORTE AGNES VIDEO 💻
 const API_BASE = "https://tupia-local-agent1.titigamer1468.workers.dev";
 
 const fileToBase64 = (file) =>
@@ -388,7 +388,6 @@ export default function AppUI() {
       return;
     }
 
-    // SI ES MODO VPS (Se va todo el lote directo al Worker)
     if (factoryEngineMode === "vps") {
       setIsBatching(true);
       setZipUrl(null);
@@ -423,14 +422,12 @@ export default function AppUI() {
       return;
     }
 
-    // SI ES MODO NAVEGADOR (Lo partimos en bloques de 6)
     const chunks = [];
     for (let i = 0; i < promptList.length; i += 6) {
-      // 💡 CORRECCIÓN DE ORDEN: Guardamos también el índice original global de cada prompt
       chunks.push(
         promptList.slice(i, i + 6).map((promptText, localIndex) => ({
           text: promptText,
-          globalIndex: i + localIndex + 1 // Para que empiece en 1, 2, 3... 120
+          globalIndex: i + localIndex + 1
         }))
       );
     }
@@ -442,7 +439,6 @@ export default function AppUI() {
     addLog(`[OK] Fábrica cargada con ${promptList.length} prompts en ${chunks.length} tandas.`);
   };
 
-  // 🔴 FUNCIONES DE DETENER PROCESOS
   const detenerChat = () => {
     if (chatAbortControllerRef.current) {
       chatAbortControllerRef.current.abort();
@@ -459,12 +455,14 @@ export default function AppUI() {
     addLog("[INFO] El usuario solicitó detener la Fábrica.");
   };
 
-  // 🔴 POLLING INDIVIDUAL PARA CADA TAREA
+  // 🔴 SOPORTE DE TAREAS Y POLLING PARA AGNES VIDEO V2.0 Y RUNWARE
   const processBrowserTask = async (promptText, displayIndex) => {
     const promptTexto = typeof promptText === "object" ? JSON.stringify(promptText) : String(promptText);
 
-    // Ajuste dinámico de proveedor según lo seleccionado
-    const currentProvider = activeModel === "flowmusic" ? "flowmusic" : "byteplus";
+    // Detección del proveedor activo en la interfaz
+    const currentProvider = activeModel === "flowmusic" ? "flowmusic" : activeModel === "agnes" ? "agnes" : "runware";
+
+    setBatchStatus(`⏳ Tarea ${displayIndex}: Renderizando con ${currentProvider}...`);
 
     const response = await fetch(`${API_BASE}/api/ai`, {
       method: "POST",
@@ -472,7 +470,8 @@ export default function AppUI() {
       body: JSON.stringify({
         activeModel: currentProvider,
         provider: currentProvider,
-        prompt: promptTexto
+        prompt: promptTexto,
+        image: factoryImage // Incluye la imagen base64 si el usuario adjuntó una (Image-to-Video)
       }),
       signal: factoryAbortControllerRef.current?.signal
     });
@@ -480,24 +479,99 @@ export default function AppUI() {
     const data = await readJsonResponse(response);
     const reply = data.reply || data.content || "";
 
-    // Reconoce tanto IDs de ByteDance (cgt-xxx) como IDs de UseAPI (números/letras sin espacios)
-    const matchId = reply.match(/cgt-[a-zA-Z0-9\-]+/) || (currentProvider === "flowmusic" ? reply.match(/[a-zA-Z0-9\-]{16,}/) : null);
-    
+    if (reply.toLowerCase().includes("failed")) {
+        throw new Error("El sistema rechazó este prompt por filtros de seguridad.");
+    }
+
+    // 1️⃣ LÓGICA PARA AGNES VIDEO (Asíncrono por Task ID / Polling de Video ID)
+    if (currentProvider === "agnes") {
+        // Extraer ID de la tarea de respuesta inicial
+        const matchTaskId = reply.match(/[a-zA-Z0-9\-]{12,}/);
+        if (!matchTaskId && !reply.startsWith("http")) {
+            throw new Error(`Respuesta inválida de Agnes Video: ${reply}`);
+        }
+
+        // Si la respuesta ya devolvió la URL de video directa
+        if (reply.startsWith("http")) {
+            return {
+                mensaje: "✅ Video renderizado con éxito (Agnes)",
+                video_url: reply.trim(),
+                taskId: `agnes_${displayIndex}`
+            };
+        }
+
+        const videoId = matchTaskId[0];
+
+        // Ciclo de Polling para Agnes (espera hasta 10 intentos de 5 segundos)
+        for (let attempt = 1; attempt <= 10; attempt++) {
+          setBatchStatus(`⏳ Tarea ${displayIndex} (Agnes): Generando fotogramas... (Intento ${attempt}/10)`);
+          
+          for (let w = 0; w < 5; w++) {
+            if (isFactoryAbortedRef.current) throw new Error("AbortError");
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+
+          const checkRes = await fetch(`${API_BASE}/api/ai`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              activeModel: "agnes",
+              provider: "agnes",
+              prompt: videoId // Consulta el estado con el ID
+            }),
+            signal: factoryAbortControllerRef.current?.signal
+          });
+
+          const checkData = await readJsonResponse(checkRes);
+          const checkReply = checkData.reply || "";
+
+          if (checkReply.toLowerCase().includes("failed")) {
+              throw new Error("Agnes Video canceló la tarea por restricciones de contenido.");
+          }
+
+          const urlMatch = checkReply.match(/https?:\/\/[^\s)]+\.mp4/i) || checkReply.match(/https?:\/\/[^\s)]+/);
+          if (urlMatch) {
+            let videoUrl = urlMatch[0];
+            if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
+            
+            return { 
+                mensaje: "✅ Video renderizado con éxito (Agnes)", 
+                video_url: videoUrl,
+                taskId: videoId
+            };
+          }
+        }
+        throw new Error(`El video de Agnes (${videoId}) superó el tiempo máximo de renderizado.`);
+    }
+
+    // 2️⃣ LÓGICA PARA RUNWARE
+    if (currentProvider === "runware") {
+        const directUrlMatch = reply.match(/https?:\/\/[^\s)]+\.mp4/i) || reply.match(/https?:\/\/[^\s)]+/);
+        if (directUrlMatch && reply.includes("¡Tu video está listo!")) {
+            let videoUrl = directUrlMatch[0];
+            if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
+            return {
+                mensaje: "✅ Video renderizado con éxito",
+                video_url: videoUrl,
+                taskId: `video_${displayIndex}`
+            };
+        }
+        throw new Error(`La respuesta de Runware no contiene un video válido. Detalle: ${reply}`);
+    }
+
+    // 3️⃣ LÓGICA LEGACY PARA FLOWMUSIC
+    const matchId = reply.match(/[a-zA-Z0-9\-]{16,}/);
     if (!matchId) {
       return { mensaje: "Respuesta directa recibida", detalle: reply };
     }
 
     const taskId = matchId[0];
 
-    // Bucle de espera segmentado (Preguntamos cada 40 segundos, máximo 6 veces)
     for (let attempt = 1; attempt <= 6; attempt++) {
-      setBatchStatus(`⏳ Tarea ${displayIndex}: Renderizando en la nube... (Intento ${attempt}/6)`);
+      setBatchStatus(`⏳ Tarea ${displayIndex}: Procesando... (Intento ${attempt}/6)`);
       
-      // Espera fragmentada de 40 segundos para poder responder al botón de aborto casi inmediatamente
       for (let w = 0; w < 40; w++) {
-        if (isFactoryAbortedRef.current) {
-            throw new Error("AbortError");
-        }
+        if (isFactoryAbortedRef.current) throw new Error("AbortError");
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
@@ -515,17 +589,14 @@ export default function AppUI() {
       const checkData = await readJsonResponse(checkRes);
       const checkReply = checkData.reply || "";
 
-      // 🔥 DETECCIÓN INSTANTÁNEA DE CENSURA
       if (checkReply.toLowerCase().includes("failed")) {
-          throw new Error("El sistema de IA rechazó este prompt por su filtro de seguridad (Censura).");
+          throw new Error("El sistema rechazó este prompt por seguridad.");
       }
 
       const urlMatch = checkReply.match(/https?:\/\/[^\s)]+/);
       if (urlMatch) {
         let videoUrl = urlMatch[0];
-        if (videoUrl.endsWith(')')) {
-            videoUrl = videoUrl.slice(0, -1);
-        }
+        if (videoUrl.endsWith(')')) videoUrl = videoUrl.slice(0, -1);
         
         return { 
             mensaje: "✅ Video renderizado con éxito", 
@@ -535,10 +606,9 @@ export default function AppUI() {
       }
     }
 
-    throw new Error(`El video ${taskId} superó el tiempo máximo de espera. Revisa el ID luego.`);
+    throw new Error(`El proceso superó el tiempo máximo de espera.`);
   };
 
-  // 🚀 EJECUTAR LA TANDA ACTUAL DE 6 DE FORMA SECUENCIAL ESTRICTA
   const ejecutarTandaActual = async () => {
     const currentBatch = lotesPendientes[loteActualIndex];
     if (!currentBatch || currentBatch.length === 0) return;
@@ -558,9 +628,8 @@ export default function AppUI() {
       const errors = [];
       let report = `=== REPORTE TANDA ${loteActualIndex + 1} ===\n\n`;
 
-      let localIter = 0; // Para saber cuándo estamos en el último elemento
+      let localIter = 0;
 
-      // 💡 BUCLE FOR OF: Garantiza que procesemos y empaquetemos el video 1 antes de tocar el 2.
       for (const promptObj of currentBatch) {
         if (isFactoryAbortedRef.current) throw new Error("AbortError");
 
@@ -572,12 +641,11 @@ export default function AppUI() {
         let lastError = "";
 
         try {
-            // Mandar a renderizar y esperar a que termine
             const result = await processBrowserTask(promptText, globalTaskNumber);
 
             if (result.video_url) {
                 try {
-                    setBatchStatus(`📥 Descargando Video ${globalTaskNumber} mediante Proxy...`);
+                    setBatchStatus(`📥 Descargando Video ${globalTaskNumber}...`);
                     const vidRes = await fetch(`${API_BASE}/api/proxy`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -624,9 +692,8 @@ export default function AppUI() {
 
         setBatchProgress((prev) => prev + 1);
 
-        // 🔥 ESCUDO HUMANO: PAUSA DE 60 SEGUNDOS ENTRE VIDEOS (Excepto en el último)
         if (localIter < currentBatch.length && !isFactoryAbortedRef.current) {
-            for (let w = 60; w > 0; w--) {
+            for (let w = 30; w > 0; w--) {
                 if (isFactoryAbortedRef.current) throw new Error("AbortError");
                 setBatchStatus(`🛡️ Pausa Anti-Ban: Esperando ${w} segundos antes del siguiente video...`);
                 await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -653,9 +720,6 @@ export default function AppUI() {
     } catch (error) {
       if (error.message === "AbortError" || error.name === "AbortError") {
          setBatchStatus("🛑 Detenido. Generando ZIP con los videos completados...");
-         try {
-             const JSZip = await loadJSZip(); 
-         } catch(e) {}
       } else {
          console.error(error);
          setBatchStatus(`❌ Error en la tanda: ${error.message}`);
@@ -1247,7 +1311,6 @@ export default function AppUI() {
               </p>
             </div>
 
-            {/* BOTÓN PRINCIPAL DE PREPARACIÓN */}
             {!isBatching && lotesPendientes.length === 0 && (
               <button
                 type="button"
@@ -1264,7 +1327,6 @@ export default function AppUI() {
               </button>
             )}
 
-            {/* PANEL DE CONTROL DE TANDAS (MODO NAVEGADOR) */}
             {factoryEngineMode === "navegador" && lotesPendientes.length > 0 && (
               <div className="rounded-xl border border-purple-500/50 bg-gray-950 p-5 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between border-b border-gray-800 pb-2">
@@ -1292,7 +1354,6 @@ export default function AppUI() {
                       Procesando video {batchProgress} de {batchTotal}...
                     </p>
 
-                    {/* BOTÓN DE ABORTO EN LA FÁBRICA */}
                     <button
                       type="button"
                       onClick={detenerFabrica}
@@ -1311,7 +1372,6 @@ export default function AppUI() {
                   </button>
                 )}
 
-                {/* BOTÓN PARA AVANZAR A LA SIGUIENTE TANDA */}
                 {!isBatching && zipUrl && loteActualIndex < lotesPendientes.length - 1 && (
                   <button
                     type="button"
@@ -1326,7 +1386,6 @@ export default function AppUI() {
                   </button>
                 )}
                 
-                {/* BOTÓN PARA REINICIAR Y CARGAR NUEVOS PROMPTS */}
                 {!isBatching && (
                   <button
                     type="button"
@@ -1343,7 +1402,6 @@ export default function AppUI() {
               </div>
             )}
 
-            {/* MODO VPS PROGRESS BAR */}
             {factoryEngineMode === "vps" && isBatching && (
               <div className="rounded-xl border border-cyan-800/50 bg-gray-950 p-4 text-center">
                 <p className="mb-2 text-sm font-bold text-cyan-400">
@@ -1641,30 +1699,11 @@ export default function AppUI() {
               </h3>
 
               <p className="mt-2 text-xs leading-relaxed text-gray-400">
-                Las API Keys, el Webhook de Modal y la URL del VPS ya no se
-                almacenan en este navegador. El Worker administra estas
-                credenciales mediante secretos de Cloudflare.
+                Las API Keys y los Endpoints de servicios multimedia residen seguros en los secretos de Cloudflare.
               </p>
 
               <div className="mt-4 rounded-lg border border-green-800/50 bg-green-950/30 p-3 text-xs text-green-400">
                 ✅ Credenciales protegidas en el servidor
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
-              <h3 className="font-bold text-purple-400">
-                🧩 Preferencias de interfaz
-              </h3>
-
-              <p className="mt-2 text-xs text-gray-400">
-                Los chats se guardan localmente en este navegador. Las
-                solicitudes de IA, fábrica y render pasan por Cloudflare.
-              </p>
-
-              <div className="mt-4 space-y-2 text-xs text-gray-500">
-                <p>• Endpoint IA: /api/ai</p>
-                <p>• Endpoint Fábrica: /api/factory</p>
-                <p>• Endpoint Render: /api/render</p>
               </div>
             </div>
 
@@ -1679,18 +1718,6 @@ export default function AppUI() {
                 ? "✅ Configuración guardada"
                 : "💾 Guardar preferencias"}
             </button>
-
-            {logs.length > 0 && (
-              <details className="rounded-xl border border-gray-800 bg-black p-3">
-                <summary className="cursor-pointer text-xs font-bold text-gray-400">
-                  Ver registro local
-                </summary>
-
-                <div className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono text-[10px] text-gray-500">
-                  {logs.join("\n")}
-                </div>
-              </details>
-            )}
           </div>
         )}
       </main>
@@ -1711,8 +1738,8 @@ export default function AppUI() {
               <option value="gemini">Gemini</option>
               <option value="alibaba">Alibaba</option>
               <option value="nvidia">Nvidia</option>
-              <option value="byteplus">🎬 BytePlus (Video)</option>
-              {/* 👇 NUEVA OPCIÓN EN EL MENÚ 👇 */}
+              <option value="runware">🎬 Runware (MiniMax Video)</option>
+              <option value="agnes">🎞️ Agnes Video API (2.0 / 2.5)</option>
               <option value="flowmusic">🎵 Google Flow (Videos Pro)</option>
               <option value="multimedia">📸 Generar Imagen / Voz</option>
             </select>
@@ -1777,7 +1804,6 @@ export default function AppUI() {
               placeholder="Escribe tu solicitud..."
             />
 
-            {/* 🔴 BOTÓN DE ENVIAR VS DETENER EN EL CHAT */}
             {isLoading ? (
               <button
                 type="button"
