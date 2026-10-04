@@ -1,5 +1,5 @@
 // ============================================================================
-// ☁️ worker/index.js - ROUTER PRINCIPAL DE CLOUDFLARE WORKERS
+// ☁️️ worker/index.js - ROUTER PRINCIPAL DE CLOUDFLARE WORKERS
 // ============================================================================
 
 const CORS_HEADERS = {
@@ -224,7 +224,6 @@ export default {
             return jsonResponse({ error: "Falta configurar BYTEPLUS_API_KEY en Cloudflare Secrets." }, 500);
           }
 
-          // 🔍 NUEVO: Si el prompt es un ID de tarea, consultamos el estado del video
           if (prompt.trim().startsWith("cgt-")) {
             const taskId = prompt.trim();
             const res = await fetch(`https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks/${taskId}`, {
@@ -235,25 +234,20 @@ export default {
             });
             const data = await res.json();
             
-            // Si el video ya está listo, devolvemos el enlace
             if (data?.content?.video_url) {
                 return jsonResponse({ reply: `✅ **¡Tu video está listo!**\n\nAquí tienes el enlace directo:\n${data.content.video_url}` });
             } 
-            // 🔥 CORRECCIÓN CLAVE: Si el estado es "failed", se detiene el polling inmediatamente
             else if (data?.task_status === "failed" || data?.status === "failed") {
-                return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nByteDance rechazó este video y lo canceló permanentemente debido a sus filtros de seguridad/censura. El prompt contenía palabras restringidas.` });
+                return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nByteDance rechazó este video debido a sus filtros de seguridad.` });
             }
-            // Si sigue procesando o en cola, avisamos
             else if (data?.task_status || data?.status) {
-                return jsonResponse({ reply: `⏳ **Estado:** ${data.task_status || data.status}\n\nEl video aún se está renderizando. Vuelve a enviar el ID en un minuto.` });
+                return jsonResponse({ reply: `⏳ **Estado:** ${data.task_status || data.status}\n\nEl video aún se está renderizando.` });
             } 
-            // Fallback por si hay otro tipo de mensaje
             else {
                 return jsonResponse({ reply: `Respuesta de estado:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`` });
             }
           }
 
-          // 🎬 NORMAL: Generar un nuevo video si no es un ID
           const targetModel = model?.includes("260615") ? model : "dreamina-seedance-2-0-mini-260615";
 
           const res = await fetch("https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks", {
@@ -278,17 +272,74 @@ export default {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error BytePlus HTTP ${res.status}` }, res.status);
           }
 
-          // La API asíncrona de video devuelve un ID de tarea
           const taskId = data?.id || data?.task_id || data?.data?.id;
           
           let replyText = "";
           if (taskId) {
-            replyText = `✅ **¡Orden recibida en ByteDance!**\n\nTu video se está renderizando en la nube.\n* **ID de Tarea:** \`${taskId}\`\n\n*(Copia y pega ese ID en el chat para consultar si ya está listo).*`;
+            replyText = `✅ **¡Orden recibida en ByteDance!**\n\nTu video se está renderizando.\n* **ID de Tarea:** \`${taskId}\``;
           } else {
             replyText = JSON.stringify(data, null, 2);
           }
           
           return jsonResponse({ reply: replyText });
+        }
+
+        // --- AGNES VIDEO API (v2.0 / 2.5) ---
+        if (provider === "agnes") {
+          const apiKey = env.AGNES_API_KEY;
+          if (!apiKey) {
+            return jsonResponse({ error: "Falta configurar AGNES_API_KEY en Cloudflare Secrets." }, 500);
+          }
+
+          if (prompt.trim().length > 10 && !prompt.includes(" ")) {
+            const taskId = prompt.trim();
+            const res = await fetch(`https://api.agnesvideo.com/v1/tasks/${taskId}`, {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${apiKey}`
+              }
+            });
+            const data = await res.json();
+            
+            if (data?.status === "completed" && data?.video_url) {
+                return jsonResponse({ reply: `✅ **¡Tu video de Agnes está listo!**\n\nEnlace directo:\n${data.video_url}` });
+            } else if (data?.status === "failed") {
+                return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nAgnes Video rechazó la tarea por filtros de seguridad.` });
+            } else {
+                return jsonResponse({ reply: `⏳ **Estado:** Renderizando en servidores de Agnes... Vuelve a enviar el ID en unos segundos.` });
+            }
+          }
+
+          const payload = {
+            prompt: prompt,
+            num_frames: 121,
+            aspect_ratio: "9:16"
+          };
+
+          if (body.image) {
+            payload.image_base64 = body.image;
+          }
+
+          const res = await fetch("https://api.agnesvideo.com/v1/generate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            return jsonResponse({ error: data?.error?.message || data?.error || `Error Agnes HTTP ${res.status}` }, res.status);
+          }
+
+          const taskId = data?.task_id || data?.id;
+          if (taskId) {
+            return jsonResponse({ reply: `✅ **¡Orden recibida en Agnes Video!**\n\n* **ID de Tarea:** \`${taskId}\`` });
+          }
+          
+          return jsonResponse({ reply: JSON.stringify(data, null, 2) });
         }
 
         // --- GOOGLE FLOW MUSIC (VÍA USEAPI PUENTE) ---
@@ -298,7 +349,6 @@ export default {
             return jsonResponse({ error: "Falta configurar USEAPI_TOKEN en Cloudflare Secrets." }, 500);
           }
 
-          // Si el prompt es un ID (empieza con num/letras y guiones largos), consultamos si ya se renderizó
           if (prompt.trim().length > 15 && !prompt.includes(" ")) {
             const taskId = prompt.trim();
             const res = await fetch(`https://api.useapi.net/v1/flowmusic/status/${taskId}`, {
@@ -312,11 +362,10 @@ export default {
             } else if (data?.status === "failed") {
                 return jsonResponse({ reply: `❌ **Estado: FAILED**\n\nGoogle rechazó el prompt.` });
             } else {
-                return jsonResponse({ reply: `⏳ **Estado:** Procesando...\n\nEl video se está renderizando con tus créditos Pro. Vuelve a enviar el ID.` });
+                return jsonResponse({ reply: `⏳ **Estado:** Procesando... Vuelve a enviar el ID.` });
             }
           }
 
-          // Enviar la orden de creación consumiendo tus créditos
           const res = await fetch("https://api.useapi.net/v1/flowmusic/generate", {
             method: "POST",
             headers: {
@@ -333,7 +382,7 @@ export default {
 
           const taskId = data?.task_id || data?.id;
           if (taskId) {
-            return jsonResponse({ reply: `✅ **¡Orden enviada a Google!**\n\nSe descontaron créditos de tu cuenta Pro.\n* **ID de Tarea:** \`${taskId}\`` });
+            return jsonResponse({ reply: `✅ **¡Orden enviada a Google!**\n\n* **ID de Tarea:** \`${taskId}\`` });
           }
           return jsonResponse({ reply: JSON.stringify(data, null, 2) });
         }
@@ -353,7 +402,6 @@ export default {
         const { factoryMode, workflow, imagen_base64, itemIndex } = body;
         const promptText = typeof workflow === "string" ? workflow : JSON.stringify(workflow);
 
-        // 1. PRIORIDAD TOTAL: Si tienes MODAL_WEBHOOK_URL o VPS_URL configurado
         const dedicatedServerUrl = env.MODAL_WEBHOOK_URL || env.VPS_URL;
 
         if (dedicatedServerUrl) {
@@ -377,14 +425,12 @@ export default {
           return jsonResponse(data, res.status);
         }
 
-        // 2. AVISO PARA MODO VIDEO (Si no hay webhook configurado)
         if (factoryMode === "video") {
           return jsonResponse({
-            error: "Falta configurar MODAL_WEBHOOK_URL en Cloudflare. Para generar video se requiere conectar tu backend de Modal con GPU."
+            error: "Falta configurar MODAL_WEBHOOK_URL en Cloudflare."
           }, 400);
         }
 
-        // 3. FALLBACK MODO IMAGEN (Flux HD)
         const seed = Math.floor(Math.random() * 1000000);
         const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?width=1080&height=1920&seed=${seed}&nologo=true&model=flux`;
 
@@ -421,7 +467,7 @@ export default {
         const vpsUrl = env.VPS_URL;
 
         if (!vpsUrl) {
-          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare para renders remotos." }, 500);
+          return jsonResponse({ error: "Falta configurar VPS_URL en Cloudflare." }, 500);
         }
 
         const response = await fetch(`${vpsUrl}/render`, {
