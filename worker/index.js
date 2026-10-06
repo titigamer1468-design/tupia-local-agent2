@@ -1,5 +1,5 @@
 // ============================================================================
-// ☁️️ worker/index.js - ROUTER PRINCIPAL DE CLOUDFLARE WORKERS
+// ☁ worker/index.js - ROUTER PRINCIPAL DE CLOUDFLARE WORKERS
 // ============================================================================
 
 const CORS_HEADERS = {
@@ -70,7 +70,14 @@ export default {
             })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `DeepSeek devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error DeepSeek HTTP ${res.status}` }, res.status);
           }
@@ -98,7 +105,14 @@ export default {
             })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `OpenAI devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error OpenAI HTTP ${res.status}` }, res.status);
           }
@@ -128,7 +142,14 @@ export default {
             })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `Claude devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || `Error Claude HTTP ${res.status}` }, res.status);
           }
@@ -156,7 +177,14 @@ export default {
             }
           );
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `Gemini devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || `Error Gemini HTTP ${res.status}` }, res.status);
           }
@@ -181,7 +209,14 @@ export default {
             body: JSON.stringify({ model: model || "qwen-max", messages })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `Alibaba devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || `Error Alibaba HTTP ${res.status}` }, res.status);
           }
@@ -209,7 +244,14 @@ export default {
             })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `Nvidia devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || `Error Nvidia HTTP ${res.status}` }, res.status);
           }
@@ -232,7 +274,13 @@ export default {
                 "Authorization": `Bearer ${apiKey}`
               }
             });
-            const data = await res.json();
+            const responseText = await res.text();
+            let data;
+            try {
+              data = JSON.parse(responseText);
+            } catch {
+              return jsonResponse({ error: `BytePlus devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+            }
             
             if (data?.content?.video_url) {
                 return jsonResponse({ reply: `✅ **¡Tu video está listo!**\n\nAquí tienes el enlace directo:\n${data.content.video_url}` });
@@ -267,7 +315,14 @@ export default {
             })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `BytePlus devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error BytePlus HTTP ${res.status}` }, res.status);
           }
@@ -299,7 +354,13 @@ export default {
                 "Authorization": `Bearer ${apiKey}`
               }
             });
-            const data = await res.json();
+            const responseText = await res.text();
+            let data;
+            try {
+              data = JSON.parse(responseText);
+            } catch {
+              return jsonResponse({ error: `Agnes devolvió respuesta no válida (HTTP ${res.status}):${responseText.slice(0, 200)}` }, res.status);
+            }
             
             if (data?.status === "completed" && data?.video_url) {
                 return jsonResponse({ reply: `✅ **¡Tu video de Agnes está listo!**\n\nEnlace directo:\n${data.video_url}` });
@@ -329,7 +390,14 @@ export default {
             body: JSON.stringify(payload)
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `Agnes devolvió respuesta no válida (HTTP ${res.status}):${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error?.message || data?.error || `Error Agnes HTTP ${res.status}` }, res.status);
           }
@@ -355,7 +423,13 @@ export default {
               method: "GET",
               headers: { "Authorization": `Bearer ${apiKey}` }
             });
-            const data = await res.json();
+            const responseText = await res.text();
+            let data;
+            try {
+              data = JSON.parse(responseText);
+            } catch {
+              return jsonResponse({ error: `FlowMusic devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+            }
             
             if (data?.status === "completed" && data?.video_url) {
                 return jsonResponse({ reply: `✅ **¡Tu video de Google está listo!**\n\nEnlace:\n${data.video_url}` });
@@ -375,7 +449,14 @@ export default {
             body: JSON.stringify({ prompt: prompt, aspect_ratio: "9:16" })
           });
 
-          const data = await res.json();
+          const responseText = await res.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            return jsonResponse({ error: `FlowMusic devolvió respuesta no válida: ${responseText.slice(0, 200)}` }, res.status);
+          }
+
           if (!res.ok) {
             return jsonResponse({ error: data?.error || `Error FlowMusic HTTP ${res.status}` }, res.status);
           }
